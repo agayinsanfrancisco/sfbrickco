@@ -3,16 +3,17 @@ import {
   listUsers,
   setRole,
   setActive,
-  listPendingBookings,
+  listOpenBookings,
   listExperts,
   getBooking,
-  acceptBooking,
+  acceptOpenBooking,
   setBookingSurcharge,
   getUserByTelegramId,
+  getUserById,
   listInventory,
   setStock,
 } from '../supabase.js';
-import { manualSurchargeCents } from '../uber.js';
+import { manualSurchargeCents, estimateBetween } from '../uber.js';
 import { adminMenu } from '../lib/keyboards.js';
 import { usd, fmtHourRange } from '../lib/format.js';
 
@@ -109,21 +110,21 @@ export async function doRemove(ctx, chatId, text) {
   await ctx.bot.sendMessage(chatId, `✅ Deactivated ${updated.full_name || id}.`);
 }
 
-// List paid+pending bookings with an "accept on behalf" affordance.
+// List open (unaccepted) bookings with an "assign a builder" affordance.
 export async function showBookings(ctx, chatId, telegramId) {
   if (!ensureAdmin(ctx, chatId, telegramId)) return;
-  const pending = await listPendingBookings();
-  if (!pending.length) {
-    await ctx.bot.sendMessage(chatId, 'No pending bookings.');
+  const open = await listOpenBookings();
+  if (!open.length) {
+    await ctx.bot.sendMessage(chatId, 'No open bookings awaiting a builder.');
     return;
   }
-  for (const b of pending) {
+  for (const b of open) {
     await ctx.bot.sendMessage(
       chatId,
-      `🕑 ${fmtHourRange(b.slot_start, b.slot_end)}\n📍 ${b.customer_address}\n💵 ${usd(
-        b.total_cents
-      )}`,
-      { reply_markup: { inline_keyboard: [[{ text: '👤 Assign an expert', callback_data: `adm:assign:${b.id}` }]] } }
+      `🕑 ${fmtHourRange(b.slot_start, b.slot_end)}\n📍 ${b.customer_address}\n💵 Service ${usd(
+        b.service_fee_cents
+      )} (+ travel on accept)`,
+      { reply_markup: { inline_keyboard: [[{ text: '👤 Assign a builder', callback_data: `adm:assign:${b.id}` }]] } }
     );
   }
 }
@@ -147,22 +148,37 @@ export async function chooseExpertForBooking(ctx, chatId, telegramId, bookingId)
   });
 }
 
-// Step 2: actually assign.
+// Step 2: assign on behalf — prices travel from the chosen builder's address.
 export async function assignExpert(ctx, chatId, telegramId, bookingId, expertId) {
   if (!ensureAdmin(ctx, chatId, telegramId)) return;
-  const booking = await acceptBooking(bookingId, expertId);
-  if (!booking) {
-    await ctx.bot.sendMessage(chatId, 'That booking is no longer pending.');
+  const builder = await getUserById(expertId);
+  const booking = await getBooking(bookingId);
+  if (!booking || booking.status !== 'awaiting_acceptance') {
+    await ctx.bot.sendMessage(chatId, 'That booking is no longer open.');
     return;
   }
-  await ctx.bot.sendMessage(chatId, '✅ Assigned.');
+  if (!builder?.address) {
+    await ctx.bot.sendMessage(chatId, 'That builder has no base address set — they need to add one first.');
+    return;
+  }
+  const est = await estimateBetween(builder.address, booking.customer_address);
+  const surcharge = est.ok ? est.surchargeCents : config.uber.flatFallbackCents;
+  const total = booking.service_fee_cents + surcharge;
+  const accepted = await acceptOpenBooking(bookingId, expertId, { surchargeCents: surcharge, totalCents: total });
+  if (!accepted) {
+    await ctx.bot.sendMessage(chatId, 'That booking is no longer open.');
+    return;
+  }
+  await ctx.bot.sendMessage(chatId, `✅ Assigned. Travel ${usd(surcharge)}; customer asked to pay ${usd(total)}.`);
   try {
     await ctx.bot.sendMessage(
-      booking.customer_telegram_id,
-      `🎉 An expert was assigned to your booking for ${fmtHourRange(
-        booking.slot_start,
-        booking.slot_end
-      )}.`
+      accepted.customer_telegram_id,
+      `🎉 A builder was assigned for ${fmtHourRange(accepted.slot_start, accepted.slot_end)}!\n` +
+        `• Service: ${usd(accepted.service_fee_cents)}\n• Travel: ${usd(surcharge)}\n• *Total: ${usd(total)}*\nTap to pay:`,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: [[{ text: `Pay ${usd(total)}`, callback_data: `book:pay:${bookingId}` }]] },
+      }
     );
   } catch {
     /* ignore */

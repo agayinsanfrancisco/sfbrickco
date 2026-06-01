@@ -53,6 +53,17 @@ export async function estimateSurcharge(address) {
   return { ok: true, miles: Math.round(miles * 10) / 10, surchargeCents };
 }
 
+// Estimate the surcharge between two free-text addresses (builder → customer).
+// Returns { ok, miles, surchargeCents } or { ok: false } if either can't geocode.
+export async function estimateBetween(originAddress, destAddress) {
+  const [o, d] = await Promise.all([geocode(originAddress), geocode(destAddress)]);
+  if (!o || !d) return { ok: false };
+  const miles =
+    haversineMiles(o.lat, o.lng, d.lat, d.lng) * ROAD_FACTOR;
+  const surchargeCents = config.uber.baseCents + Math.round(miles * config.uber.perMileCents);
+  return { ok: true, miles: Math.round(miles * 10) / 10, surchargeCents };
+}
+
 // Option B helper: turn an admin/expert-entered dollar amount into cents.
 export function manualSurchargeCents(dollarsText) {
   const n = Number.parseFloat(String(dollarsText).replace(/[^0-9.]/g, ''));

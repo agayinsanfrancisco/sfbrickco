@@ -1,15 +1,10 @@
 import { config } from '../config.js';
 import { createBooking, slotTaken } from '../supabase.js';
-import { estimateSurcharge } from '../uber.js';
 import { upcomingDays, hourlySlots } from '../lib/slots.js';
-import {
-  daysKeyboard,
-  hoursKeyboard,
-  confirmBookingKeyboard,
-} from '../lib/keyboards.js';
+import { daysKeyboard, hoursKeyboard } from '../lib/keyboards.js';
 import { usd, fmtHourRange } from '../lib/format.js';
-import { notifyAdminsForFare } from './admin.js';
 import { presentBookingMethods } from './payments.js';
+import { notifyExpertsOfOpenBooking } from './expert.js';
 
 export async function startBooking(ctx, chatId) {
   const days = upcomingDays(7);
@@ -57,10 +52,13 @@ export async function pickHour(ctx, chatId, startIso) {
 }
 
 // Called from the text handler once we have the address in session.
+// New flow: create an OPEN job (no charge yet) and notify builders. The travel
+// cost is priced when a builder accepts (from that builder's address), then the
+// customer is sent a payment link.
 export async function receiveAddress(ctx, chatId, telegramId, address) {
   const session = ctx.sessions.get(chatId);
   if (!session?.data?.startIso) {
-    await ctx.bot.sendMessage(chatId, 'Let’s start over — tap "Book a LEGO expert".');
+    await ctx.bot.sendMessage(chatId, 'Let’s start over — tap "Book a builder".');
     ctx.sessions.delete(chatId);
     return;
   }
@@ -68,37 +66,6 @@ export async function receiveAddress(ctx, chatId, telegramId, address) {
   ctx.sessions.delete(chatId);
 
   const serviceFee = config.pricing.serviceFeeCents;
-  const est = await estimateSurcharge(address); // option A
-
-  if (est.ok) {
-    const total = serviceFee + est.surchargeCents;
-    const booking = await createBooking({
-      customer_telegram_id: telegramId,
-      customer_address: address,
-      slot_start: startIso,
-      slot_end: endIso,
-      service_fee_cents: serviceFee,
-      surcharge_cents: est.surchargeCents,
-      surcharge_source: 'estimate',
-      distance_miles: est.miles,
-      total_cents: total,
-    });
-    await ctx.bot.sendMessage(
-      chatId,
-      `🧾 *Booking summary*\n` +
-        `🕑 ${fmtHourRange(startIso, endIso)}\n` +
-        `📍 ${address}\n\n` +
-        `• Expert setup (1 hr): ${usd(serviceFee)}\n` +
-        `• Travel surcharge (~${est.miles} mi est.): ${usd(est.surchargeCents)}\n` +
-        `• *Total: ${usd(total)}*\n\n` +
-        `Pay to send your request to our experts.`,
-      { parse_mode: 'Markdown', ...confirmBookingKeyboard(booking.id) }
-    );
-    return;
-  }
-
-  // Option B: couldn't estimate → create with pending surcharge, ask an admin
-  // to confirm the fare. Customer is told we'll follow up.
   const booking = await createBooking({
     customer_telegram_id: telegramId,
     customer_address: address,
@@ -107,15 +74,18 @@ export async function receiveAddress(ctx, chatId, telegramId, address) {
     service_fee_cents: serviceFee,
     surcharge_cents: 0,
     surcharge_source: 'pending',
-    total_cents: serviceFee,
+    total_cents: serviceFee, // placeholder until a builder accepts
+    status: 'awaiting_acceptance',
   });
+
   await ctx.bot.sendMessage(
     chatId,
-    `📍 We couldn’t auto-estimate the travel fare for that address.\n` +
-      `A team member will confirm the Uber surcharge shortly, then send you a payment link. ` +
-      `Your slot ${fmtHourRange(startIso, endIso)} is held pending confirmation.`
+    `📝 *Request submitted* for ${fmtHourRange(startIso, endIso)}\n📍 ${address}\n\n` +
+      `A builder will accept your job, then we’ll send your payment link ` +
+      `(service ${usd(serviceFee)} + travel from the builder to you).`,
+    { parse_mode: 'Markdown' }
   );
-  await notifyAdminsForFare(ctx, booking);
+  await notifyExpertsOfOpenBooking(ctx, booking);
 }
 
 // Customer chose to pay → present available payment methods (card / crypto).

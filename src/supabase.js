@@ -293,11 +293,12 @@ export async function setBookingCrypto(
   return data;
 }
 
+// Builder already assigned at acceptance → paying confirms the job ('accepted').
 // Conditional on still-unpaid, so a double confirm is a no-op (returns null).
 export async function markBookingPaid(bookingId) {
   const { data } = await supabase
     .from('bookings')
-    .update({ payment_status: 'paid', status: 'pending' })
+    .update({ payment_status: 'paid', status: 'accepted' })
     .eq('id', bookingId)
     .eq('payment_status', 'unpaid')
     .select('*')
@@ -315,18 +316,35 @@ export async function listPendingBookings() {
   return data || [];
 }
 
-// Accept a paid+pending booking, assigning an expert. Uses a conditional
-// update so two experts can't both win the same slot.
-export async function acceptBooking(bookingId, expertId) {
+// Open (unpaid) bookings awaiting a builder to accept.
+export async function listOpenBookings() {
+  const { data } = await supabase
+    .from('bookings')
+    .select('*')
+    .eq('status', 'awaiting_acceptance')
+    .order('slot_start', { ascending: true });
+  return data || [];
+}
+
+// A builder accepts an open job: assign them, set the travel surcharge priced
+// from THEIR address, and move it to awaiting_payment. Conditional on still
+// being open so two builders can't both win it.
+export async function acceptOpenBooking(bookingId, expertId, { surchargeCents, totalCents }) {
   const { data, error } = await supabase
     .from('bookings')
-    .update({ status: 'accepted', expert_id: expertId })
+    .update({
+      status: 'awaiting_payment',
+      expert_id: expertId,
+      surcharge_cents: surchargeCents,
+      surcharge_source: 'estimate',
+      total_cents: totalCents,
+    })
     .eq('id', bookingId)
-    .eq('status', 'pending')
+    .eq('status', 'awaiting_acceptance')
     .select('*')
     .maybeSingle();
   if (error) throw error;
-  return data; // null if it was already taken
+  return data; // null if another builder took it first
 }
 
 export async function declineBooking(bookingId) {
@@ -378,7 +396,7 @@ export async function slotTaken(slotStartIso) {
     .from('bookings')
     .select('id')
     .eq('slot_start', slotStartIso)
-    .in('status', ['pending', 'accepted'])
+    .in('status', ['awaiting_acceptance', 'awaiting_payment', 'pending', 'accepted'])
     .limit(1);
   return (data || []).length > 0;
 }

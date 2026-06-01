@@ -1,40 +1,50 @@
+import { config } from '../config.js';
 import {
   getUserByTelegramId,
   getUserById,
-  listPendingBookings,
-  acceptBooking,
+  listOpenBookings,
+  acceptOpenBooking,
   getBooking,
+  listExperts,
   setUserAddress,
 } from '../supabase.js';
+import { estimateBetween } from '../uber.js';
 import { expertJobKeyboard } from '../lib/keyboards.js';
 import { usd, fmtHourRange } from '../lib/format.js';
-
-function bookingCard(b) {
-  return (
-    `🛠️ *Setup request*\n` +
-    `🕑 ${fmtHourRange(b.slot_start, b.slot_end)}\n` +
-    `📍 ${b.customer_address || '(address on file)'}\n` +
-    `💵 Paid total ${usd(b.total_cents)} (your fee ${usd(b.service_fee_cents)} + travel ${usd(
-      b.surcharge_cents
-    )})`
-  );
-}
 
 async function ensureExpert(ctx, chatId, telegramId) {
   const user = await getUserByTelegramId(telegramId);
   if (!user || (user.role !== 'expert' && user.role !== 'admin')) {
-    await ctx.bot.sendMessage(chatId, 'This area is for LEGO experts only.');
+    await ctx.bot.sendMessage(chatId, 'This area is for SF Brick Co builders only.');
     return null;
   }
   if (!user.active) {
-    await ctx.bot.sendMessage(chatId, 'Your expert account is currently inactive.');
+    await ctx.bot.sendMessage(chatId, 'Your builder account is currently inactive.');
     return null;
   }
   return user;
 }
 
-// Builder sets/updates their own base address (used to price the courier/Uber
-// leg from the builder to the customer).
+// Card for an open job, showing the travel estimate from THIS builder's address.
+async function openJobCard(booking, builder) {
+  let costLine;
+  if (!builder.address) {
+    costLine = '\n⚠️ Set your base address (📍 Update my address) to price + accept.';
+  } else {
+    const est = await estimateBetween(builder.address, booking.customer_address);
+    costLine = est.ok
+      ? `\n🚕 Travel from you ≈ ${usd(est.surchargeCents)} (~${est.miles} mi)`
+      : '\n🚕 Travel: couldn’t estimate (a flat fee will apply)';
+  }
+  return (
+    `🛠️ *Open job*\n` +
+    `🕑 ${fmtHourRange(booking.slot_start, booking.slot_end)}\n` +
+    `📍 ${booking.customer_address}\n` +
+    `💵 Service fee ${usd(booking.service_fee_cents)}${costLine}`
+  );
+}
+
+// Builder self-service base address (origin for travel pricing).
 export async function promptSetAddress(ctx, chatId, telegramId) {
   const user = await ensureExpert(ctx, chatId, telegramId);
   if (!user) return;
@@ -42,7 +52,7 @@ export async function promptSetAddress(ctx, chatId, telegramId) {
   const current = user.address ? `\nCurrent: ${user.address}` : '';
   await ctx.bot.sendMessage(
     chatId,
-    `📍 Send your *base address* (where you start from). We use it to price the travel to each job.${current}`,
+    `📍 Send your *base address* (where you start from). We use it to price travel to each job.${current}`,
     { parse_mode: 'Markdown' }
   );
 }
@@ -59,13 +69,13 @@ export async function doSetAddress(ctx, chatId, telegramId, text) {
 export async function listJobs(ctx, chatId, telegramId) {
   const user = await ensureExpert(ctx, chatId, telegramId);
   if (!user) return;
-  const pending = await listPendingBookings();
-  if (pending.length === 0) {
+  const open = await listOpenBookings();
+  if (open.length === 0) {
     await ctx.bot.sendMessage(chatId, 'No open jobs right now. We’ll ping you when one comes in.');
     return;
   }
-  for (const b of pending) {
-    await ctx.bot.sendMessage(chatId, bookingCard(b), {
+  for (const b of open) {
+    await ctx.bot.sendMessage(chatId, await openJobCard(b, user), {
       parse_mode: 'Markdown',
       ...expertJobKeyboard(b.id),
     });
@@ -75,45 +85,64 @@ export async function listJobs(ctx, chatId, telegramId) {
 export async function accept(ctx, chatId, telegramId, bookingId) {
   const user = await ensureExpert(ctx, chatId, telegramId);
   if (!user) return;
-  const booking = await acceptBooking(bookingId, user.id);
-  if (!booking) {
-    await ctx.bot.sendMessage(chatId, 'Too late — another expert already grabbed that one.');
+  if (!user.address) {
+    await ctx.bot.sendMessage(
+      chatId,
+      '📍 Set your base address first (📍 Update my address) so we can price the travel.'
+    );
+    return;
+  }
+  const booking = await getBooking(bookingId);
+  if (!booking || booking.status !== 'awaiting_acceptance') {
+    await ctx.bot.sendMessage(chatId, 'That job is no longer open.');
+    return;
+  }
+  const est = await estimateBetween(user.address, booking.customer_address);
+  const surcharge = est.ok ? est.surchargeCents : config.uber.flatFallbackCents;
+  const total = booking.service_fee_cents + surcharge;
+  const accepted = await acceptOpenBooking(bookingId, user.id, {
+    surchargeCents: surcharge,
+    totalCents: total,
+  });
+  if (!accepted) {
+    await ctx.bot.sendMessage(chatId, 'Too late — another builder grabbed that one.');
     return;
   }
   await ctx.bot.sendMessage(
     chatId,
-    `✅ You’re booked for ${fmtHourRange(booking.slot_start, booking.slot_end)}.\n📍 ${
-      booking.customer_address
-    }`
+    `✅ You took the job for ${fmtHourRange(accepted.slot_start, accepted.slot_end)}.\n` +
+      `📍 ${accepted.customer_address}\nTravel ${usd(surcharge)}. Awaiting customer payment.`
   );
-  // Let the customer know.
-  await ctx.bot.sendMessage(
-    booking.customer_telegram_id,
-    `🎉 An expert accepted your booking for ${fmtHourRange(
-      booking.slot_start,
-      booking.slot_end
-    )}. See you then!`
-  );
+  try {
+    await ctx.bot.sendMessage(
+      accepted.customer_telegram_id,
+      `🎉 A builder accepted your booking for ${fmtHourRange(accepted.slot_start, accepted.slot_end)}!\n` +
+        `• Service: ${usd(accepted.service_fee_cents)}\n• Travel: ${usd(surcharge)}\n• *Total: ${usd(total)}*\nTap to pay:`,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: [[{ text: `Pay ${usd(total)}`, callback_data: `book:pay:${bookingId}` }]] },
+      }
+    );
+  } catch {
+    /* ignore */
+  }
 }
 
-export async function decline(ctx, chatId, bookingId) {
-  // Per-expert decline just removes it from this expert's view; the booking
-  // stays open for others.
-  await ctx.bot.sendMessage(chatId, 'Skipped. It stays available for other experts.');
+export async function decline(ctx, chatId, _bookingId) {
+  await ctx.bot.sendMessage(chatId, 'Skipped — it stays open for other builders.');
 }
 
-// Notify all active experts that a new paid booking is awaiting acceptance.
-export async function notifyExpertsOfBooking(ctx, booking) {
-  const { listExperts } = await import('../supabase.js');
+// Notify active builders of a new open job (each sees travel from their address).
+export async function notifyExpertsOfOpenBooking(ctx, booking) {
   const experts = await listExperts({ activeOnly: true });
   for (const e of experts) {
     try {
-      await ctx.bot.sendMessage(e.telegram_id, `📨 New job available:\n\n${bookingCard(booking)}`, {
+      await ctx.bot.sendMessage(e.telegram_id, `📨 New open job:\n\n${await openJobCard(booking, e)}`, {
         parse_mode: 'Markdown',
         ...expertJobKeyboard(booking.id),
       });
     } catch {
-      // expert may have never started a chat with the bot; skip.
+      /* builder hasn't opened the bot */
     }
   }
 }

@@ -12,8 +12,8 @@ import {
   markBookingPaid,
   setBookingCrypto,
   nextDerivationIndex,
+  getUserById,
 } from '../supabase.js';
-import { notifyExpertsOfBooking } from './expert.js';
 
 // Crypto-only payments (BTC/LTC). With an xpub configured, each order gets a
 // unique derived address and the watcher auto-confirms on-chain; otherwise a
@@ -269,20 +269,34 @@ export async function confirmOrder(ctx, order, { auto = false } = {}) {
 
 export async function confirmBooking(ctx, booking, { auto = false } = {}) {
   const paid = await markBookingPaid(booking.id);
-  if (!paid) return false;
+  if (!paid) return false; // already confirmed
+  const when = fmtHourRange(paid.slot_start, paid.slot_end);
   try {
-    await ctx.bot.sendMessage(paid.customer_telegram_id, '✅ Payment confirmed! Finding you a LEGO expert now…');
+    await ctx.bot.sendMessage(paid.customer_telegram_id, `✅ Payment confirmed! Your builder is booked for ${when}.`);
   } catch {
     /* ignore */
   }
+  // Notify the assigned builder that their job is paid/confirmed.
+  if (paid.expert_id) {
+    const builder = await getUserById(paid.expert_id);
+    if (builder) {
+      try {
+        await ctx.bot.sendMessage(
+          builder.telegram_id,
+          `💰 Payment received — your job for ${when} at ${paid.customer_address} is confirmed.`
+        );
+      } catch {
+        /* ignore */
+      }
+    }
+  }
   for (const adminId of config.adminIds) {
     try {
-      await ctx.bot.sendMessage(adminId, `✅ Booking ${booking.id} paid (${auto ? 'auto' : 'manual'}); experts notified.`);
+      await ctx.bot.sendMessage(adminId, `✅ Booking ${booking.id} paid (${auto ? 'auto' : 'manual'}) & confirmed.`);
     } catch {
       /* ignore */
     }
   }
-  await notifyExpertsOfBooking(ctx, paid);
   return true;
 }
 
