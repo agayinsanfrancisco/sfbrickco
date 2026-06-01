@@ -9,6 +9,8 @@ import {
   acceptBooking,
   setBookingSurcharge,
   getUserByTelegramId,
+  listInventory,
+  setStock,
 } from '../supabase.js';
 import { manualSurchargeCents } from '../uber.js';
 import { adminMenu } from '../lib/keyboards.js';
@@ -165,6 +167,49 @@ export async function assignExpert(ctx, chatId, telegramId, bookingId, expertId)
   } catch {
     /* ignore */
   }
+}
+
+// ── Inventory ────────────────────────────────────────────────────────
+export async function showInventory(ctx, chatId, telegramId) {
+  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const items = await listInventory();
+  if (!items.length) {
+    await ctx.bot.sendMessage(chatId, 'No inventory items.');
+    return;
+  }
+  const rows = items.map((it) => [
+    { text: `✏️ Set ${it.name} (now ${it.stock_qty})`, callback_data: `adm:stock:${it.sku}` },
+  ]);
+  const lines = items.map((it) => `• ${it.name} (\`${it.sku}\`): *${it.stock_qty}* in stock`);
+  await ctx.bot.sendMessage(chatId, `📦 *Inventory*\n${lines.join('\n')}`, {
+    parse_mode: 'Markdown',
+    reply_markup: { inline_keyboard: rows },
+  });
+}
+
+export async function promptSetStock(ctx, chatId, telegramId, sku) {
+  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  ctx.sessions.set(chatId, { flow: 'admin', step: 'awaiting_stock', data: { sku } });
+  await ctx.bot.sendMessage(chatId, `Enter the new stock quantity for \`${sku}\`:`, {
+    parse_mode: 'Markdown',
+  });
+}
+
+export async function doSetStock(ctx, chatId, text) {
+  const session = ctx.sessions.get(chatId);
+  const sku = session?.data?.sku;
+  ctx.sessions.delete(chatId);
+  if (!sku) return;
+  const qty = Number.parseInt(String(text).trim(), 10);
+  if (Number.isNaN(qty) || qty < 0) {
+    await ctx.bot.sendMessage(chatId, 'Please send a whole number (0 or more).');
+    return;
+  }
+  const updated = await setStock(sku, qty);
+  await ctx.bot.sendMessage(
+    chatId,
+    updated ? `✅ ${updated.name} stock set to ${updated.stock_qty}.` : 'SKU not found.'
+  );
 }
 
 // ── Manual surcharge (option B) ──────────────────────────────────────

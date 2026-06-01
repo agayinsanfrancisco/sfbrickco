@@ -3,8 +3,10 @@ import { createBot } from './src/bot.js';
 import { createServer } from './src/server.js';
 import { listBookingsNeedingReview } from './src/supabase.js';
 import { promptReview } from './src/flows/review.js';
+import { watchOnce } from './src/watcher.js';
 
 const REVIEW_POLL_MS = 60 * 1000;
+const WATCH_POLL_MS = 60 * 1000;
 
 function startReviewScheduler(ctx) {
   const tick = async () => {
@@ -21,16 +23,29 @@ function startReviewScheduler(ctx) {
   tick(); // run once on boot
 }
 
+function startPaymentWatcher(ctx) {
+  const tick = async () => {
+    try {
+      await watchOnce(ctx);
+    } catch (err) {
+      console.error('payment watcher error:', err);
+    }
+  };
+  setInterval(tick, WATCH_POLL_MS);
+  tick();
+}
+
 function main() {
   const { bot, ctx } = createBot();
   console.log('🤖 Telegram bot started (long polling).');
 
-  const app = createServer(ctx);
+  const app = createServer();
   app.listen(config.server.port, () => {
-    console.log(`🌐 Webhook server on :${config.server.port} (POST /webhook/stripe)`);
+    console.log(`🌐 Web server on :${config.server.port} (landing page + /health)`);
   });
 
   startReviewScheduler(ctx);
+  startPaymentWatcher(ctx);
 
   const shutdown = (sig) => {
     console.log(`\n${sig} received, shutting down…`);

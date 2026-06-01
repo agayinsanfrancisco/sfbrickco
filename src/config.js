@@ -24,17 +24,6 @@ export const config = {
     url: required('SUPABASE_URL'),
     serviceKey: required('SUPABASE_SERVICE_KEY'),
   },
-  stripe: {
-    // Optional at boot so the site can go live before Stripe is connected.
-    // Payments stay disabled until both are present (see `enabled`).
-    secretKey: process.env.STRIPE_SECRET_KEY || '',
-    webhookSecret: process.env.STRIPE_WEBHOOK_SECRET || '',
-    successUrl: process.env.STRIPE_SUCCESS_URL || 'https://t.me',
-    cancelUrl: process.env.STRIPE_CANCEL_URL || 'https://t.me',
-    get enabled() {
-      return Boolean(this.secretKey && this.webhookSecret);
-    },
-  },
   pricing: {
     unitCents: int('LEGO_UNIT_PRICE_CENTS', 1000),
     bundleQty: int('LEGO_BUNDLE_QTY', 6),
@@ -42,10 +31,15 @@ export const config = {
     serviceFeeCents: int('SERVICE_FEE_CENTS', 5000),
   },
   crypto: {
+    // Preferred: account xpub/zpub (BIP84 native segwit) → unique address per
+    // order + automatic on-chain confirmation via the watcher.
+    btcXpub: process.env.BTC_XPUB || '',
+    ltcXpub: process.env.LTC_XPUB || '',
+    // Fallback: a single static address (manual admin confirmation).
     btcAddress: process.env.BTC_ADDRESS || '',
     ltcAddress: process.env.LTC_ADDRESS || '',
     get enabled() {
-      return Boolean(this.btcAddress || this.ltcAddress);
+      return Boolean(this.btcXpub || this.ltcXpub || this.btcAddress || this.ltcAddress);
     },
   },
   uber: {

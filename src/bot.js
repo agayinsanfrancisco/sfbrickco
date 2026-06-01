@@ -76,6 +76,8 @@ export function createBot() {
         await admin.doRemove(ctx, chatId, msg.text);
       } else if (s.flow === 'admin' && s.step === 'awaiting_fare') {
         await admin.doSetFare(ctx, chatId, msg.text);
+      } else if (s.flow === 'admin' && s.step === 'awaiting_stock') {
+        await admin.doSetStock(ctx, chatId, msg.text);
       } else if (s.flow === 'review' && s.step === 'awaiting_comment') {
         await review.addComment(ctx, chatId, telegramId, msg.text.trim());
       }
@@ -107,22 +109,13 @@ export function createBot() {
       else if (data === 'book:cancel') await booking.cancelBooking(ctx, chatId);
       // Payments (method selection / crypto / admin confirm)
       else if (data.startsWith('pm:')) {
-        const p = sliceAfter(data, 'pm:').split(':');
-        if (p[0] === 'o' || p[0] === 'b') {
-          const [kind, method, ref] = p; // ref: qty (orders) or bookingId (bookings)
-          if (kind === 'o' && method === 'card')
-            await payments.payOrderCard(ctx, chatId, telegramId, Number.parseInt(ref, 10));
-          else if (kind === 'o')
-            await payments.payOrderCrypto(ctx, chatId, telegramId, method, Number.parseInt(ref, 10));
-          else if (kind === 'b' && method === 'card')
-            await payments.payBookingCard(ctx, chatId, telegramId, ref);
-          else if (kind === 'b')
-            await payments.payBookingCrypto(ctx, chatId, telegramId, method, ref);
-        } else if (p[0] === 'sent') {
-          await payments.customerSent(ctx, chatId, p[1], p[2]);
-        } else if (p[0] === 'ok') {
-          await payments.adminConfirm(ctx, chatId, telegramId, p[1], p[2]);
-        }
+        const p = sliceAfter(data, 'pm:').split(':'); // crypto-only (btc/ltc)
+        if (p[0] === 'o')
+          await payments.payOrderCrypto(ctx, chatId, telegramId, p[1], Number.parseInt(p[2], 10));
+        else if (p[0] === 'b')
+          await payments.payBookingCrypto(ctx, chatId, telegramId, p[1], p[2]);
+        else if (p[0] === 'sent') await payments.customerSent(ctx, chatId, p[1], p[2]);
+        else if (p[0] === 'ok') await payments.adminConfirm(ctx, chatId, telegramId, p[1], p[2]);
       }
       // Expert
       else if (data === 'exp:list') await expert.listJobs(ctx, chatId, telegramId);
@@ -141,6 +134,9 @@ export function createBot() {
       else if (data === 'adm:addexpert') await admin.promptAddExpert(ctx, chatId, telegramId);
       else if (data === 'adm:remove') await admin.promptRemove(ctx, chatId, telegramId);
       else if (data === 'adm:bookings') await admin.showBookings(ctx, chatId, telegramId);
+      else if (data === 'adm:inv') await admin.showInventory(ctx, chatId, telegramId);
+      else if (data.startsWith('adm:stock:'))
+        await admin.promptSetStock(ctx, chatId, telegramId, sliceAfter(data, 'adm:stock:'));
       else if (data.startsWith('adm:assignto:')) {
         const [bid, eid] = sliceAfter(data, 'adm:assignto:').split(':');
         await admin.assignExpert(ctx, chatId, telegramId, bid, eid);

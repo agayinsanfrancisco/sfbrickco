@@ -1,38 +1,35 @@
 import QRCode from 'qrcode';
 import { config } from './config.js';
-
-// Static-address crypto acceptance. Because all customers pay the same wallet,
-// payments can't be auto-attributed to an order on-chain — confirmation is done
-// by an admin (see flows/payments.js). This module handles pricing + QR only.
+import { deriveAddress } from './hdwallet.js';
 
 export const COINS = {
-  btc: { id: 'bitcoin', scheme: 'bitcoin', label: 'Bitcoin', ticker: 'BTC', decimals: 8 },
-  ltc: { id: 'litecoin', scheme: 'litecoin', label: 'Litecoin', ticker: 'LTC', decimals: 8 },
+  btc: { scheme: 'bitcoin', label: 'Bitcoin', ticker: 'BTC', decimals: 8 },
+  ltc: { scheme: 'litecoin', label: 'Litecoin', ticker: 'LTC', decimals: 8 },
 };
 
-export function addressFor(coin) {
-  if (coin === 'btc') return config.crypto.btcAddress;
-  if (coin === 'ltc') return config.crypto.ltcAddress;
-  return '';
+function xpubFor(coin) {
+  return coin === 'btc' ? config.crypto.btcXpub : coin === 'ltc' ? config.crypto.ltcXpub : '';
+}
+function staticAddr(coin) {
+  return coin === 'btc' ? config.crypto.btcAddress : coin === 'ltc' ? config.crypto.ltcAddress : '';
 }
 
-// mempool.space-style block explorers, so an admin can verify a payment in one tap.
-const EXPLORERS = {
-  btc: 'https://mempool.space/address/',
-  ltc: 'https://litecoinspace.org/address/',
-};
-
-export function explorerUrl(coin) {
-  const base = EXPLORERS[coin];
-  const addr = addressFor(coin);
-  return base && addr ? base + addr : null;
+export function hasXpub(coin) {
+  return Boolean(xpubFor(coin));
 }
-
 export function isCoinAvailable(coin) {
-  return Boolean(addressFor(coin));
+  return Boolean(xpubFor(coin) || staticAddr(coin));
 }
 
-// Lightweight 60s price cache so rapid clicks don't hammer CoinGecko.
+// Receive address for a payment: a unique derived address when an xpub is set
+// (enables the watcher), otherwise the static fallback address.
+export function receiveAddress(coin, index) {
+  const xpub = xpubFor(coin);
+  if (xpub) return deriveAddress(coin, xpub, index);
+  return staticAddr(coin);
+}
+
+// ── USD → crypto pricing (60s cache) ─────────────────────────────────
 let _cache = { at: 0, prices: null };
 const PRICE_URL =
   'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin,litecoin&vs_currencies=usd';
@@ -49,20 +46,48 @@ async function getPrices() {
   return prices;
 }
 
-// Convert a USD-cents total into a crypto amount string (fixed decimals).
 export async function quote(coin, usdCents) {
   const prices = await getPrices();
-  const usd = usdCents / 100;
-  const amount = usd / prices[coin];
+  const amount = usdCents / 100 / prices[coin];
   return amount.toFixed(COINS[coin].decimals);
 }
 
-// BIP21-style payment URI (works for both bitcoin: and litecoin: wallets).
-export function paymentUri(coin, amount) {
-  return `${COINS[coin].scheme}:${addressFor(coin)}?amount=${amount}`;
+export function toSats(amountStr) {
+  return Math.round(Number.parseFloat(amountStr) * 1e8);
 }
 
-// PNG buffer of the payment URI, for sendPhoto.
-export function qrPng(coin, amount) {
-  return QRCode.toBuffer(paymentUri(coin, amount), { width: 320, margin: 1 });
+// ── Payment URI + QR ─────────────────────────────────────────────────
+export function paymentUri(coin, amount, address) {
+  return `${COINS[coin].scheme}:${address}?amount=${amount}`;
+}
+export function qrPng(coin, amount, address) {
+  return QRCode.toBuffer(paymentUri(coin, amount, address), { width: 320, margin: 1 });
+}
+
+// ── Block explorers (mempool.space-style) ────────────────────────────
+const EXPLORER_WEB = {
+  btc: 'https://mempool.space/address/',
+  ltc: 'https://litecoinspace.org/address/',
+};
+const EXPLORER_API = {
+  btc: 'https://mempool.space/api',
+  ltc: 'https://litecoinspace.org/api',
+};
+
+export function explorerUrl(coin, address) {
+  const base = EXPLORER_WEB[coin];
+  return base && address ? base + address : null;
+}
+
+// Total confirmed sats/litoshis received by an address. Used by the watcher.
+export async function getConfirmedReceived(coin, address) {
+  const base = EXPLORER_API[coin];
+  if (!base) throw new Error(`no explorer for ${coin}`);
+  const res = await fetch(`${base}/address/${address}`, { headers: { Accept: 'application/json' } });
+  if (!res.ok) throw new Error(`explorer ${res.status}`);
+  const j = await res.json();
+  return {
+    confirmed: j.chain_stats?.funded_txo_sum ?? 0,
+    mempool: j.mempool_stats?.funded_txo_sum ?? 0,
+  };
 }

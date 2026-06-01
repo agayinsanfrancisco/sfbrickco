@@ -99,6 +99,7 @@ export function adminMenu() {
         [{ text: '➕ Add expert', callback_data: 'adm:addexpert' }],
         [{ text: '➖ Remove user', callback_data: 'adm:remove' }],
         [{ text: '📋 Pending bookings', callback_data: 'adm:bookings' }],
+        [{ text: '📦 Inventory', callback_data: 'adm:inv' }],
       ],
     },
   };
