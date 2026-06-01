@@ -6,7 +6,10 @@ export function mainMenu({ isExpert, isAdmin } = {}) {
     [{ text: '🧱 Buy red LEGOs', callback_data: 'shop:start' }],
     [{ text: '🛠️ Book a LEGO expert', callback_data: 'book:start' }],
   ];
-  if (isExpert) rows.push([{ text: '📋 My jobs (expert)', callback_data: 'exp:list' }]);
+  if (isExpert) {
+    rows.push([{ text: '📋 My jobs (builder)', callback_data: 'exp:list' }]);
+    rows.push([{ text: '📍 Update my address', callback_data: 'exp:addr' }]);
+  }
   if (isAdmin) rows.push([{ text: '⚙️ Admin panel', callback_data: 'adm:menu' }]);
   return { reply_markup: { inline_keyboard: rows } };
 }

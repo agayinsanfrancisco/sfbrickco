@@ -74,6 +74,16 @@ export async function setRole(telegramId, role) {
   return data;
 }
 
+export async function setUserAddress(telegramId, address) {
+  const { data } = await supabase
+    .from('users')
+    .update({ address })
+    .eq('telegram_id', telegramId)
+    .select('*')
+    .maybeSingle();
+  return data;
+}
+
 export async function setActive(telegramId, active) {
   const { data, error } = await supabase
     .from('users')

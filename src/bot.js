@@ -92,6 +92,8 @@ export function createBot() {
         await admin.doSetFare(ctx, chatId, msg.text);
       } else if (s.flow === 'admin' && s.step === 'awaiting_stock') {
         await admin.doSetStock(ctx, chatId, msg.text);
+      } else if (s.flow === 'expert' && s.step === 'awaiting_builder_address') {
+        await expert.doSetAddress(ctx, chatId, telegramId, msg.text.trim());
       } else if (s.flow === 'review' && s.step === 'awaiting_comment') {
         await review.addComment(ctx, chatId, telegramId, msg.text.trim());
       }
@@ -136,6 +138,7 @@ export function createBot() {
       }
       // Expert
       else if (data === 'exp:list') await expert.listJobs(ctx, chatId, telegramId);
+      else if (data === 'exp:addr') await expert.promptSetAddress(ctx, chatId, telegramId);
       else if (data.startsWith('exp:acc:'))
         await expert.accept(ctx, chatId, telegramId, sliceAfter(data, 'exp:acc:'));
       else if (data.startsWith('exp:dec:'))

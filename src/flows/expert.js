@@ -4,6 +4,7 @@ import {
   listPendingBookings,
   acceptBooking,
   getBooking,
+  setUserAddress,
 } from '../supabase.js';
 import { expertJobKeyboard } from '../lib/keyboards.js';
 import { usd, fmtHourRange } from '../lib/format.js';
@@ -30,6 +31,29 @@ async function ensureExpert(ctx, chatId, telegramId) {
     return null;
   }
   return user;
+}
+
+// Builder sets/updates their own base address (used to price the courier/Uber
+// leg from the builder to the customer).
+export async function promptSetAddress(ctx, chatId, telegramId) {
+  const user = await ensureExpert(ctx, chatId, telegramId);
+  if (!user) return;
+  ctx.sessions.set(chatId, { flow: 'expert', step: 'awaiting_builder_address' });
+  const current = user.address ? `\nCurrent: ${user.address}` : '';
+  await ctx.bot.sendMessage(
+    chatId,
+    `📍 Send your *base address* (where you start from). We use it to price the travel to each job.${current}`,
+    { parse_mode: 'Markdown' }
+  );
+}
+
+export async function doSetAddress(ctx, chatId, telegramId, text) {
+  ctx.sessions.delete(chatId);
+  const updated = await setUserAddress(telegramId, String(text).trim());
+  await ctx.bot.sendMessage(
+    chatId,
+    updated ? `✅ Base address saved: ${updated.address}` : 'Could not save your address.'
+  );
 }
 
 export async function listJobs(ctx, chatId, telegramId) {
