@@ -3,207 +3,315 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>SF Brick Company — Red LEGO® bricks &amp; on-site setup help in San Francisco</title>
+    <title>SF Brick Company — custom 3D-printed brick accessories &amp; on-site build help</title>
     <meta
       name="description"
-      content="SF Brick Company sells red building bricks and offers on-site, by-the-hour expert setup help across San Francisco. Pay securely online."
+      content="SF Brick Company designs custom 3D-printed accessories, helmets, weapons and structural parts compatible with leading building-block brands — plus on-site build help in San Francisco. Pay in crypto."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap"
+      rel="stylesheet"
     />
     <style>
       :root {
-        --red: #d1232a;
-        --ink: #15171c;
-        --muted: #5b6270;
-        --line: #e6e8ec;
-        --bg: #fbfbfc;
-        --max: 880px;
+        --paper: #f1ece1;
+        --paper-2: #e9e2d3;
+        --ink: #17130e;
+        --muted: #6f6757;
+        --line: #d8cfbd;
+        --red: #c5382b;
+        --blue: #2747b8;
+        --max: 1080px;
+        --r: 14px;
       }
       * { box-sizing: border-box; }
-      html { scroll-behavior: smooth; }
+      html { scroll-behavior: smooth; -webkit-font-smoothing: antialiased; }
       body {
         margin: 0;
-        font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        background: var(--paper);
         color: var(--ink);
-        background: var(--bg);
+        font-family: "IBM Plex Sans", sans-serif;
+        font-size: 17px;
+        line-height: 1.6;
+        /* LEGO-stud dot grid + warm vignette */
+        background-image:
+          radial-gradient(circle at center, rgba(23, 19, 14, 0.05) 1.4px, transparent 1.6px);
+        background-size: 26px 26px;
       }
-      a { color: var(--red); }
-      header.hero {
-        background: linear-gradient(160deg, #fff 0%, #fff5f5 100%);
+      .wrap { max-width: var(--max); margin: 0 auto; padding: 0 24px; }
+      a { color: inherit; }
+      h1, h2, h3 { font-family: "Bricolage Grotesque", sans-serif; font-weight: 800; letter-spacing: -0.02em; line-height: 1.02; margin: 0; }
+      .mono { font-family: "IBM Plex Mono", monospace; }
+      .tag {
+        font-family: "IBM Plex Mono", monospace; font-size: 12px; font-weight: 600;
+        letter-spacing: 0.16em; text-transform: uppercase; color: var(--red);
+      }
+
+      /* ── Nav ── */
+      nav {
+        position: sticky; top: 0; z-index: 20;
+        backdrop-filter: blur(8px); background: rgba(241, 236, 225, 0.82);
         border-bottom: 1px solid var(--line);
       }
-      .wrap { max-width: var(--max); margin: 0 auto; padding: 0 20px; }
-      nav {
-        display: flex; align-items: center; justify-content: space-between;
-        padding: 18px 20px; max-width: var(--max); margin: 0 auto;
-      }
-      .brand { font-weight: 800; letter-spacing: -0.02em; font-size: 18px; }
-      .brand .dot { color: var(--red); }
-      nav a { margin-left: 18px; text-decoration: none; color: var(--muted); font-size: 14px; font-weight: 600; }
-      nav a:hover { color: var(--ink); }
-      .hero-inner { padding: 56px 20px 64px; max-width: var(--max); margin: 0 auto; }
-      h1 { font-size: clamp(30px, 5vw, 46px); line-height: 1.08; letter-spacing: -0.03em; margin: 0 0 14px; }
-      .lede { font-size: 19px; color: var(--muted); max-width: 620px; margin: 0 0 28px; }
+      .nav-in { max-width: var(--max); margin: 0 auto; padding: 14px 24px; display: flex; align-items: center; justify-content: space-between; }
+      .brand { display: flex; align-items: center; gap: 10px; font-family: "Bricolage Grotesque"; font-weight: 800; font-size: 19px; letter-spacing: -0.02em; }
+      .stud { width: 18px; height: 18px; border-radius: 4px; background: var(--red); box-shadow: inset 0 0 0 3px var(--paper), inset 0 0 0 4px var(--red); }
+      .nav-links { display: flex; gap: 22px; font-size: 14px; }
+      .nav-links a { text-decoration: none; color: var(--muted); font-weight: 500; transition: color .15s; }
+      .nav-links a:hover { color: var(--ink); }
+      @media (max-width: 720px) { .nav-links { display: none; } }
+
+      /* ── Buttons ── */
       .btn {
-        display: inline-block; background: var(--red); color: #fff; text-decoration: none;
-        padding: 13px 22px; border-radius: 10px; font-weight: 700; font-size: 15px;
+        display: inline-flex; align-items: center; gap: 8px; text-decoration: none;
+        background: var(--ink); color: var(--paper); font-weight: 600; font-size: 15px;
+        padding: 14px 22px; border-radius: 10px; border: 1px solid var(--ink);
+        transition: transform .12s ease, box-shadow .12s ease;
+        box-shadow: 4px 4px 0 var(--red);
       }
-      .btn:hover { filter: brightness(0.94); }
-      section { padding: 48px 0; border-bottom: 1px solid var(--line); }
-      section h2 { font-size: 26px; letter-spacing: -0.02em; margin: 0 0 8px; }
-      section .sub { color: var(--muted); margin: 0 0 24px; }
-      .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
-      .card { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 22px; }
-      .price { font-size: 30px; font-weight: 800; letter-spacing: -0.02em; }
-      .price small { font-size: 14px; font-weight: 600; color: var(--muted); }
-      .steps { counter-reset: step; padding: 0; list-style: none; margin: 0; display: grid; gap: 14px; }
-      .steps li { position: relative; padding-left: 44px; }
+      .btn:hover { transform: translate(-2px, -2px); box-shadow: 6px 6px 0 var(--red); }
+      .btn.ghost { background: transparent; color: var(--ink); box-shadow: 4px 4px 0 var(--line); }
+      .btn.ghost:hover { box-shadow: 6px 6px 0 var(--line); }
+
+      /* ── Hero ── */
+      header.hero { padding: 70px 0 40px; position: relative; overflow: hidden; }
+      .hero h1 { font-size: clamp(40px, 8vw, 86px); }
+      .hero h1 em { font-style: normal; color: var(--red); }
+      .lede { font-size: clamp(17px, 2.4vw, 21px); color: var(--muted); max-width: 600px; margin: 22px 0 30px; }
+      .hero-cta { display: flex; gap: 14px; flex-wrap: wrap; }
+      .reveal { opacity: 0; transform: translateY(14px); animation: rise .7s cubic-bezier(.2,.7,.2,1) forwards; }
+      .reveal:nth-child(1){animation-delay:.05s}
+      .reveal:nth-child(2){animation-delay:.14s}
+      .reveal:nth-child(3){animation-delay:.23s}
+      .reveal:nth-child(4){animation-delay:.32s}
+      @keyframes rise { to { opacity: 1; transform: none; } }
+      .hero-strip { display: flex; gap: 28px; flex-wrap: wrap; margin-top: 46px; padding-top: 22px; border-top: 1px solid var(--line); }
+      .hero-strip div { font-family: "IBM Plex Mono", monospace; font-size: 13px; color: var(--muted); }
+      .hero-strip b { display: block; font-family: "Bricolage Grotesque"; font-size: 26px; color: var(--ink); letter-spacing: -0.02em; }
+
+      /* ── Sections ── */
+      section { padding: 64px 0; border-top: 1px solid var(--line); }
+      .sec-head { display: flex; align-items: baseline; gap: 16px; margin-bottom: 30px; flex-wrap: wrap; }
+      .sec-head h2 { font-size: clamp(28px, 4.5vw, 40px); }
+      .sec-head p { color: var(--muted); margin: 0; max-width: 460px; }
+
+      /* ── Catalog cards (spec sheets) ── */
+      .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }
+      .card {
+        background: var(--paper-2); border: 1px solid var(--line); border-radius: var(--r);
+        padding: 26px; position: relative; overflow: hidden;
+      }
+      .card::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 5px; background: var(--accent, var(--red)); }
+      .card.red { --accent: var(--red); }
+      .card.blue { --accent: var(--blue); }
+      .card .sku { font-family: "IBM Plex Mono", monospace; font-size: 12px; letter-spacing: 0.12em; color: var(--muted); }
+      .card h3 { font-size: 27px; margin: 6px 0 16px; }
+      .pricerow { display: flex; align-items: baseline; gap: 10px; padding: 10px 0; border-top: 1px dashed var(--line); }
+      .pricerow:first-of-type { border-top: none; }
+      .pricerow .q { font-family: "IBM Plex Mono", monospace; font-size: 13px; color: var(--muted); flex: 1; }
+      .pricerow .p { font-family: "Bricolage Grotesque"; font-weight: 800; font-size: 22px; color: var(--accent, var(--ink)); }
+      .swatch { width: 40px; height: 40px; border-radius: 8px; background: var(--accent); position: absolute; top: 22px; right: 22px; box-shadow: inset 0 0 0 6px rgba(255,255,255,.18); }
+
+      /* ── Steps ── */
+      .steps { display: grid; gap: 2px; counter-reset: s; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+      .steps li { list-style: none; display: flex; gap: 18px; padding: 22px 24px; background: var(--paper-2); align-items: flex-start; }
       .steps li::before {
-        counter-increment: step; content: counter(step);
-        position: absolute; left: 0; top: -2px; width: 30px; height: 30px; border-radius: 50%;
-        background: var(--red); color: #fff; font-weight: 700; display: grid; place-items: center; font-size: 14px;
+        counter-increment: s; content: counter(s, decimal-leading-zero);
+        font-family: "IBM Plex Mono", monospace; font-weight: 600; color: var(--red); font-size: 14px; padding-top: 3px; min-width: 28px;
       }
-      .policy h3 { margin: 22px 0 6px; font-size: 17px; }
-      .policy p, .policy li { color: #2c2f36; }
-      footer { padding: 40px 0 64px; color: var(--muted); font-size: 14px; }
-      .contact-box {
-        background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 22px;
-        display: grid; gap: 6px;
-      }
-      .note { background: #fffbe6; border: 1px solid #f6e7a1; border-radius: 10px; padding: 12px 14px; font-size: 13px; color: #6b5b00; }
-      .tag { display: inline-block; font-size: 12px; font-weight: 700; color: var(--red); text-transform: uppercase; letter-spacing: 0.08em; }
+      .steps li b { font-family: "Bricolage Grotesque"; font-weight: 700; }
+      ol { padding: 0; margin: 0; }
+
+      /* ── Pay chips ── */
+      .chips { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
+      .chip { display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border: 1px solid var(--line); border-radius: 999px; background: var(--paper-2); font-weight: 600; font-size: 15px; }
+      .chip .d { width: 12px; height: 12px; border-radius: 3px; }
+
+      /* ── Policies ── */
+      .policy { display: grid; grid-template-columns: 200px 1fr; gap: 14px 36px; }
+      .policy .ph { font-family: "Bricolage Grotesque"; font-weight: 700; font-size: 18px; position: relative; padding-left: 18px; }
+      .policy .ph::before { content: ""; position: absolute; left: 0; top: 7px; width: 8px; height: 8px; border-radius: 2px; background: var(--red); }
+      .policy .pb { color: #3b362d; }
+      .policy .pb ul { margin: 0; padding-left: 18px; }
+      .policy .pb li { margin: 6px 0; }
+      .policy + .policy { margin-top: 26px; }
+      @media (max-width: 720px) { .policy { grid-template-columns: 1fr; gap: 6px; } .policy + .policy { margin-top: 30px; } }
+
+      /* ── Contact ── */
+      .contact-card { background: var(--ink); color: var(--paper); border-radius: var(--r); padding: 30px; display: grid; gap: 10px; }
+      .contact-card .row { display: flex; gap: 12px; font-size: 15px; }
+      .contact-card .k { font-family: "IBM Plex Mono", monospace; font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: #b7a98c; min-width: 96px; padding-top: 2px; }
+      .contact-card a { color: #f3b8b0; }
+      .repl { color: #e7c14a; }
+      .note { margin-top: 16px; font-size: 13px; color: var(--muted); font-family: "IBM Plex Mono", monospace; background: var(--paper-2); border: 1px dashed var(--line); border-radius: 10px; padding: 12px 14px; }
+
+      footer { padding: 40px 0 70px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; font-family: "IBM Plex Mono", monospace; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+      .fine { font-size: 12px; color: var(--muted); margin-top: 14px; }
     </style>
   </head>
   <body>
-    <header class="hero">
-      <nav>
-        <div class="brand">SF Brick Company<span class="dot">.</span></div>
-        <div>
-          <a href="#products">Products</a>
-          <a href="#service">Setup help</a>
+    <nav>
+      <div class="nav-in">
+        <div class="brand"><span class="stud"></span>SF Brick Company</div>
+        <div class="nav-links">
+          <a href="#catalog">Catalog</a>
+          <a href="#build">Build help</a>
+          <a href="#pay">Payment</a>
           <a href="#policies">Policies</a>
           <a href="#contact">Contact</a>
         </div>
-      </nav>
-      <div class="hero-inner">
-        <span class="tag">San Francisco · est. 2026</span>
-        <h1>Red building bricks, plus an expert to set them up.</h1>
-        <p class="lede">
-          We sell premium red building bricks and send a friendly LEGO®-savvy
-          expert to your door to help you build. Order and pay securely online.
+      </div>
+    </nav>
+
+    <header class="hero">
+      <div class="wrap">
+        <div class="tag reveal">San Francisco · additive manufacturing studio</div>
+        <h1 class="reveal">The bricks the<br />box <em>forgot.</em></h1>
+        <p class="lede reveal">
+          Custom, 3D-printed accessories — helmets, weapons, and structural parts compatible
+          with leading building-block brands. Sci-fi, historical, and fantasy upgrades, printed
+          to spec and couriered to your build table.
         </p>
-        <a class="btn" href="https://t.me/your_bot_username">Order on Telegram</a>
+        <div class="hero-cta reveal">
+          <a class="btn" href="https://t.me/your_bot_username">Order on Telegram →</a>
+          <a class="btn ghost" href="#build">Hire a builder</a>
+        </div>
+        <div class="hero-strip">
+          <div><b>2</b>parts in the catalog</div>
+          <div><b>1&nbsp;hr</b>on-site build sessions</div>
+          <div><b>₿ · Ł</b>crypto, 0% fees</div>
+          <div><b>24&nbsp;hr</b>booking window</div>
+        </div>
       </div>
     </header>
 
     <main class="wrap">
-      <!-- PRODUCTS -->
-      <section id="products">
-        <h2>Products &amp; pricing</h2>
-        <p class="sub">Physical red building bricks, shipped or hand-delivered within San Francisco.</p>
+      <!-- CATALOG -->
+      <section id="catalog">
+        <div class="sec-head">
+          <span class="tag">01 / Catalog</span>
+          <h2>Parts &amp; pricing</h2>
+          <p>Premium printed bricks, couriered within San Francisco. Delivery fee shown at checkout.</p>
+        </div>
         <div class="cards">
-          <div class="card">
-            <div class="tag">Single</div>
-            <div class="price">$10 <small>/ brick</small></div>
-            <p>One premium red building brick.</p>
+          <div class="card red">
+            <span class="swatch"></span>
+            <div class="sku">SKU · RED-BRICK-120</div>
+            <h3>Red Brick #120</h3>
+            <div class="pricerow"><span class="q">Single</span><span class="p">$10</span></div>
+            <div class="pricerow"><span class="q">Pack of 6</span><span class="p">$45</span></div>
           </div>
-          <div class="card">
-            <div class="tag">Bundle</div>
-            <div class="price">$45 <small>/ 6 bricks</small></div>
-            <p>Six red building bricks — our most popular pack ($7.50 each).</p>
+          <div class="card blue">
+            <span class="swatch"></span>
+            <div class="sku">SKU · BLUE-BRICK-25</div>
+            <h3>Blue Brick #25</h3>
+            <div class="pricerow"><span class="q">Pack of 4</span><span class="p">$8</span></div>
+            <div class="pricerow"><span class="q">Pack of 10</span><span class="p">$15</span></div>
           </div>
         </div>
       </section>
 
-      <!-- SERVICE -->
-      <section id="service">
-        <h2>Hire a LEGO® setup expert</h2>
-        <p class="sub">
-          A flat <strong>$50</strong> for a one-hour, on-site building session, plus a
-          transparent travel surcharge.
-        </p>
+      <!-- BUILD HELP -->
+      <section id="build">
+        <div class="sec-head">
+          <span class="tag">02 / Service</span>
+          <h2>Hire a builder</h2>
+          <p>A flat <strong>$50</strong> for a one-hour, on-site building session, plus transparent travel.</p>
+        </div>
         <ol class="steps">
-          <li>Pick a one-hour slot — available 24 hours a day, 7 days a week.</li>
-          <li>Tell us your address. We calculate the travel surcharge from a live
-            rideshare estimate (Civic Center → your location); if it can't be
-            auto-estimated, we confirm the exact fare with you before any charge.</li>
-          <li>Pay the $50 fee + travel surcharge securely. Your request goes to our experts.</li>
-          <li>An expert accepts and arrives at your slot. Afterward, you're invited to leave a review.</li>
+          <li><span><b>Pick a slot.</b> One-hour sessions, bookable within the next 24 hours.</span></li>
+          <li><span><b>Give your address.</b> Your request goes out to our builders — no charge yet.</span></li>
+          <li><span><b>A builder accepts.</b> Travel is priced from that builder's location to you (a live rideshare estimate) and added to the $50 fee.</span></li>
+          <li><span><b>Pay &amp; build.</b> You get a payment link, pay in crypto, and your builder arrives at the slot. Afterward, you're invited to leave a review.</span></li>
         </ol>
-        <p style="margin-top:22px;color:var(--muted);">
-          The travel surcharge reflects the real cost of getting an expert to you and
-          is shown as a separate line item at checkout before you pay.
+      </section>
+
+      <!-- PAYMENT -->
+      <section id="pay">
+        <div class="sec-head">
+          <span class="tag">03 / Payment</span>
+          <h2>Pay in crypto</h2>
+          <p>Self-custodial, on-chain, confirmed automatically. No cards, no processor, no fees from us.</p>
+        </div>
+        <div class="chips">
+          <span class="chip"><span class="d" style="background:var(--red)"></span>Bitcoin (BTC)</span>
+          <span class="chip"><span class="d" style="background:var(--blue)"></span>Litecoin (LTC)</span>
+        </div>
+        <p style="color:var(--muted); margin-top:18px; max-width:620px;">
+          At checkout you're shown an exact amount and a one-time address (with a QR). Once your
+          payment lands on-chain, your order or booking confirms itself — usually within minutes.
         </p>
       </section>
 
       <!-- POLICIES -->
-      <section id="policies" class="policy">
-        <h2>Policies</h2>
-        <p class="sub">Please read before purchasing. These govern all orders and bookings.</p>
+      <section id="policies">
+        <div class="sec-head">
+          <span class="tag">04 / The fine print</span>
+          <h2>Policies</h2>
+          <p>Please read before purchasing. These govern all orders and bookings.</p>
+        </div>
 
-        <h3>Refunds &amp; cancellations</h3>
-        <ul>
-          <li><strong>Brick orders:</strong> unopened brick orders may be refunded in full
-            within 14 days of delivery. Email us to arrange a return.</li>
-          <li><strong>Setup bookings:</strong> cancel at least 2 hours before your slot for a
-            full refund. Cancellations inside 2 hours are refunded minus the travel
-            surcharge if an expert is already en route.</li>
-          <li><strong>No expert available:</strong> if no expert accepts your booking, you are
-            refunded in full automatically.</li>
-          <li>Refunds are issued to your original payment method via Stripe and typically
-            settle within 5–10 business days.</li>
-        </ul>
+        <div class="policy">
+          <div class="ph">Refunds &amp; cancellations</div>
+          <div class="pb">
+            <ul>
+              <li><strong>Parts:</strong> unused parts may be refunded within 14 days of delivery — contact us to arrange a return.</li>
+              <li><strong>Build sessions:</strong> cancel at least 2 hours before your slot for a full refund. Inside 2 hours, the travel portion is non-refundable if your builder is already en route.</li>
+              <li><strong>No builder available:</strong> you only pay <em>after</em> a builder accepts, so an unaccepted request is never charged.</li>
+              <li>Refunds are sent on-chain to an address you provide; network (miner) fees may be deducted.</li>
+            </ul>
+          </div>
+        </div>
 
-        <h3>Fulfillment</h3>
-        <p>
-          Brick orders are delivered or shipped within San Francisco. Setup bookings are
-          fulfilled in person at the address you provide, during the one-hour slot you select.
-        </p>
+        <div class="policy">
+          <div class="ph">Fulfillment</div>
+          <div class="pb">Parts are couriered within San Francisco; the delivery fee is shown at checkout. Build sessions are fulfilled in person at the address you provide, during the one-hour slot you select.</div>
+        </div>
 
-        <h3>Privacy</h3>
-        <p>
-          We collect only what we need to fulfill your order: your Telegram identifier,
-          your name, the delivery/service address you provide, and your booking history.
-          Payment card details are handled entirely by Stripe and never touch our servers.
-          We do not sell your data. To request deletion of your data, contact us below.
-        </p>
+        <div class="policy">
+          <div class="ph">Privacy</div>
+          <div class="pb">We collect only what's needed to fulfill your order: your Telegram handle, name, the delivery/service address you give us, a phone number for the courier, and your order history. Payments are made directly on-chain — we never see or store card details. We don't sell your data. To request deletion, contact us below.</div>
+        </div>
 
-        <h3>Terms of service</h3>
-        <p>
-          By placing an order or booking, you agree to pay the listed price plus any
-          disclosed travel surcharge. Services are provided as-is for lawful, personal use.
-          Prices and availability may change. These terms are governed by the laws of the
-          State of California.
-        </p>
-        <p style="font-size:13px;color:var(--muted);margin-top:18px;">
-          LEGO® is a trademark of the LEGO Group, which does not sponsor, authorize, or
-          endorse SF Brick Company "Red bricks" refers to generic construction bricks.
+        <div class="policy">
+          <div class="ph">Terms of service</div>
+          <div class="pb">By placing an order or booking you agree to pay the listed price plus any disclosed travel fee. Products and services are provided as-is for lawful, personal use. Prices and availability may change. These terms are governed by the laws of the State of California.</div>
+        </div>
+
+        <p class="fine">
+          LEGO® is a trademark of the LEGO Group, which does not sponsor, authorize, or endorse
+          SF Brick Company. Our parts are independent, third-party accessories designed to be
+          compatible with common building-block systems.
         </p>
       </section>
 
       <!-- CONTACT -->
       <section id="contact">
-        <h2>Contact &amp; customer service</h2>
-        <p class="sub">We respond within one business day.</p>
-        <div class="contact-box">
-          <div><strong>SF Brick Company</strong> <!-- [REPLACE] legal/registered business name --></div>
-          <div>Email: <a href="mailto:support@example.com">support@example.com</a> <!-- [REPLACE] --></div>
-          <div>Phone: (415) 555-0100 <!-- [REPLACE] --></div>
-          <div>Address: 1 Carlton B. Goodlett Pl, San Francisco, CA 94102 <!-- [REPLACE] business address --></div>
-          <div>Telegram: <a href="https://t.me/your_bot_username">@your_bot_username</a> <!-- [REPLACE] --></div>
+        <div class="sec-head">
+          <span class="tag">05 / Contact</span>
+          <h2>Customer service</h2>
+          <p>We respond within one business day.</p>
         </div>
-        <p class="note" style="margin-top:18px;">
-          ⚠️ Before submitting to Stripe: replace every <code>[REPLACE]</code> placeholder
-          above with your real legal business name, support email, phone, and physical
-          address. Stripe verification checks that a working contact method and a clear
-          refund policy are present and consistent with your account details.
-        </p>
+        <div class="contact-card">
+          <div class="row"><span class="k">Business</span><span>SF Brick Company</span></div>
+          <div class="row"><span class="k">Email</span><span class="repl">[ add support email ]</span></div>
+          <div class="row"><span class="k">Phone</span><span class="repl">[ add phone ]</span></div>
+          <div class="row"><span class="k">Address</span><span class="repl">[ add business address, San Francisco, CA ]</span></div>
+          <div class="row"><span class="k">Telegram</span><a href="https://t.me/your_bot_username">@your_bot_username</a></div>
+        </div>
+        <div class="note">
+          To finish: replace the highlighted [ … ] fields with your real support email, phone,
+          and business address, and swap @your_bot_username for your bot's handle.
+        </div>
       </section>
-
-      <footer>
-        © <span id="yr">2026</span> SF Brick Company All rights reserved. ·
-        <a href="#policies">Refund Policy</a> ·
-        <a href="#policies">Privacy</a> ·
-        <a href="#policies">Terms</a>
-      </footer>
     </main>
+
+    <footer class="wrap">
+      <span>© <span id="yr">2026</span> SF Brick Company · San Francisco, CA</span>
+      <span><a href="#policies" style="text-decoration:none">Refunds</a> · <a href="#policies" style="text-decoration:none">Privacy</a> · <a href="#policies" style="text-decoration:none">Terms</a></span>
+    </footer>
+    <script>document.getElementById('yr').textContent = new Date().getFullYear();</script>
   </body>
 </html>
