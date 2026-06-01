@@ -1,14 +1,19 @@
 {
-  "name": "heaux-sf-ice-cream-bot",
+  "name": "sfbrickco",
   "version": "1.0.0",
-  "description": "Telegram bot for Heaux SF ice cream delivery with Square Checkout",
+  "description": "Telegram bot for SF Brick Company: red LEGO brick sales + bookable LEGO-expert setup service, paid via Stripe",
   "main": "index.js",
+  "type": "module",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "dev": "node --watch index.js"
   },
   "dependencies": {
     "node-telegram-bot-api": "^0.66.0",
-    "@supabase/supabase-js": "^2.39.0"
+    "@supabase/supabase-js": "^2.39.0",
+    "stripe": "^14.21.0",
+    "express": "^4.19.2",
+    "dotenv": "^16.4.5"
   },
   "engines": {
     "node": ">=18.0.0"

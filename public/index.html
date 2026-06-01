@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SF Brick Company — Red LEGO® bricks &amp; on-site setup help in San Francisco</title>
+    <meta
+      name="description"
+      content="SF Brick Company sells red building bricks and offers on-site, by-the-hour expert setup help across San Francisco. Pay securely online."
+    />
+    <style>
+      :root {
+        --red: #d1232a;
+        --ink: #15171c;
+        --muted: #5b6270;
+        --line: #e6e8ec;
+        --bg: #fbfbfc;
+        --max: 880px;
+      }
+      * { box-sizing: border-box; }
+      html { scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        font: 16px/1.65 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        color: var(--ink);
+        background: var(--bg);
+      }
+      a { color: var(--red); }
+      header.hero {
+        background: linear-gradient(160deg, #fff 0%, #fff5f5 100%);
+        border-bottom: 1px solid var(--line);
+      }
+      .wrap { max-width: var(--max); margin: 0 auto; padding: 0 20px; }
+      nav {
+        display: flex; align-items: center; justify-content: space-between;
+        padding: 18px 20px; max-width: var(--max); margin: 0 auto;
+      }
+      .brand { font-weight: 800; letter-spacing: -0.02em; font-size: 18px; }
+      .brand .dot { color: var(--red); }
+      nav a { margin-left: 18px; text-decoration: none; color: var(--muted); font-size: 14px; font-weight: 600; }
+      nav a:hover { color: var(--ink); }
+      .hero-inner { padding: 56px 20px 64px; max-width: var(--max); margin: 0 auto; }
+      h1 { font-size: clamp(30px, 5vw, 46px); line-height: 1.08; letter-spacing: -0.03em; margin: 0 0 14px; }
+      .lede { font-size: 19px; color: var(--muted); max-width: 620px; margin: 0 0 28px; }
+      .btn {
+        display: inline-block; background: var(--red); color: #fff; text-decoration: none;
+        padding: 13px 22px; border-radius: 10px; font-weight: 700; font-size: 15px;
+      }
+      .btn:hover { filter: brightness(0.94); }
+      section { padding: 48px 0; border-bottom: 1px solid var(--line); }
+      section h2 { font-size: 26px; letter-spacing: -0.02em; margin: 0 0 8px; }
+      section .sub { color: var(--muted); margin: 0 0 24px; }
+      .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; }
+      .card { background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 22px; }
+      .price { font-size: 30px; font-weight: 800; letter-spacing: -0.02em; }
+      .price small { font-size: 14px; font-weight: 600; color: var(--muted); }
+      .steps { counter-reset: step; padding: 0; list-style: none; margin: 0; display: grid; gap: 14px; }
+      .steps li { position: relative; padding-left: 44px; }
+      .steps li::before {
+        counter-increment: step; content: counter(step);
+        position: absolute; left: 0; top: -2px; width: 30px; height: 30px; border-radius: 50%;
+        background: var(--red); color: #fff; font-weight: 700; display: grid; place-items: center; font-size: 14px;
+      }
+      .policy h3 { margin: 22px 0 6px; font-size: 17px; }
+      .policy p, .policy li { color: #2c2f36; }
+      footer { padding: 40px 0 64px; color: var(--muted); font-size: 14px; }
+      .contact-box {
+        background: #fff; border: 1px solid var(--line); border-radius: 14px; padding: 22px;
+        display: grid; gap: 6px;
+      }
+      .note { background: #fffbe6; border: 1px solid #f6e7a1; border-radius: 10px; padding: 12px 14px; font-size: 13px; color: #6b5b00; }
+      .tag { display: inline-block; font-size: 12px; font-weight: 700; color: var(--red); text-transform: uppercase; letter-spacing: 0.08em; }
+    </style>
+  </head>
+  <body>
+    <header class="hero">
+      <nav>
+        <div class="brand">SF Brick Company<span class="dot">.</span></div>
+        <div>
+          <a href="#products">Products</a>
+          <a href="#service">Setup help</a>
+          <a href="#policies">Policies</a>
+          <a href="#contact">Contact</a>
+        </div>
+      </nav>
+      <div class="hero-inner">
+        <span class="tag">San Francisco · est. 2026</span>
+        <h1>Red building bricks, plus an expert to set them up.</h1>
+        <p class="lede">
+          We sell premium red building bricks and send a friendly LEGO®-savvy
+          expert to your door to help you build. Order and pay securely online.
+        </p>
+        <a class="btn" href="https://t.me/your_bot_username">Order on Telegram</a>
+      </div>
+    </header>
+
+    <main class="wrap">
+      <!-- PRODUCTS -->
+      <section id="products">
+        <h2>Products &amp; pricing</h2>
+        <p class="sub">Physical red building bricks, shipped or hand-delivered within San Francisco.</p>
+        <div class="cards">
+          <div class="card">
+            <div class="tag">Single</div>
+            <div class="price">$10 <small>/ brick</small></div>
+            <p>One premium red building brick.</p>
+          </div>
+          <div class="card">
+            <div class="tag">Bundle</div>
+            <div class="price">$45 <small>/ 6 bricks</small></div>
+            <p>Six red building bricks — our most popular pack ($7.50 each).</p>
+          </div>
+        </div>
+      </section>
+
+      <!-- SERVICE -->
+      <section id="service">
+        <h2>Hire a LEGO® setup expert</h2>
+        <p class="sub">
+          A flat <strong>$50</strong> for a one-hour, on-site building session, plus a
+          transparent travel surcharge.
+        </p>
+        <ol class="steps">
+          <li>Pick a one-hour slot — available 24 hours a day, 7 days a week.</li>
+          <li>Tell us your address. We calculate the travel surcharge from a live
+            rideshare estimate (Civic Center → your location); if it can't be
+            auto-estimated, we confirm the exact fare with you before any charge.</li>
+          <li>Pay the $50 fee + travel surcharge securely. Your request goes to our experts.</li>
+          <li>An expert accepts and arrives at your slot. Afterward, you're invited to leave a review.</li>
+        </ol>
+        <p style="margin-top:22px;color:var(--muted);">
+          The travel surcharge reflects the real cost of getting an expert to you and
+          is shown as a separate line item at checkout before you pay.
+        </p>
+      </section>
+
+      <!-- POLICIES -->
+      <section id="policies" class="policy">
+        <h2>Policies</h2>
+        <p class="sub">Please read before purchasing. These govern all orders and bookings.</p>
+
+        <h3>Refunds &amp; cancellations</h3>
+        <ul>
+          <li><strong>Brick orders:</strong> unopened brick orders may be refunded in full
+            within 14 days of delivery. Email us to arrange a return.</li>
+          <li><strong>Setup bookings:</strong> cancel at least 2 hours before your slot for a
+            full refund. Cancellations inside 2 hours are refunded minus the travel
+            surcharge if an expert is already en route.</li>
+          <li><strong>No expert available:</strong> if no expert accepts your booking, you are
+            refunded in full automatically.</li>
+          <li>Refunds are issued to your original payment method via Stripe and typically
+            settle within 5–10 business days.</li>
+        </ul>
+
+        <h3>Fulfillment</h3>
+        <p>
+          Brick orders are delivered or shipped within San Francisco. Setup bookings are
+          fulfilled in person at the address you provide, during the one-hour slot you select.
+        </p>
+
+        <h3>Privacy</h3>
+        <p>
+          We collect only what we need to fulfill your order: your Telegram identifier,
+          your name, the delivery/service address you provide, and your booking history.
+          Payment card details are handled entirely by Stripe and never touch our servers.
+          We do not sell your data. To request deletion of your data, contact us below.
+        </p>
+
+        <h3>Terms of service</h3>
+        <p>
+          By placing an order or booking, you agree to pay the listed price plus any
+          disclosed travel surcharge. Services are provided as-is for lawful, personal use.
+          Prices and availability may change. These terms are governed by the laws of the
+          State of California.
+        </p>
+        <p style="font-size:13px;color:var(--muted);margin-top:18px;">
+          LEGO® is a trademark of the LEGO Group, which does not sponsor, authorize, or
+          endorse SF Brick Company "Red bricks" refers to generic construction bricks.
+        </p>
+      </section>
+
+      <!-- CONTACT -->
+      <section id="contact">
+        <h2>Contact &amp; customer service</h2>
+        <p class="sub">We respond within one business day.</p>
+        <div class="contact-box">
+          <div><strong>SF Brick Company</strong> <!-- [REPLACE] legal/registered business name --></div>
+          <div>Email: <a href="mailto:support@example.com">support@example.com</a> <!-- [REPLACE] --></div>
+          <div>Phone: (415) 555-0100 <!-- [REPLACE] --></div>
+          <div>Address: 1 Carlton B. Goodlett Pl, San Francisco, CA 94102 <!-- [REPLACE] business address --></div>
+          <div>Telegram: <a href="https://t.me/your_bot_username">@your_bot_username</a> <!-- [REPLACE] --></div>
+        </div>
+        <p class="note" style="margin-top:18px;">
+          ⚠️ Before submitting to Stripe: replace every <code>[REPLACE]</code> placeholder
+          above with your real legal business name, support email, phone, and physical
+          address. Stripe verification checks that a working contact method and a clear
+          refund policy are present and consistent with your account details.
+        </p>
+      </section>
+
+      <footer>
+        © <span id="yr">2026</span> SF Brick Company All rights reserved. ·
+        <a href="#policies">Refund Policy</a> ·
+        <a href="#policies">Privacy</a> ·
+        <a href="#policies">Terms</a>
+      </footer>
+    </main>
+  </body>
+</html>
