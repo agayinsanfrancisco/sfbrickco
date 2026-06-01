@@ -16,6 +16,18 @@ export function addressFor(coin) {
   return '';
 }
 
+// mempool.space-style block explorers, so an admin can verify a payment in one tap.
+const EXPLORERS = {
+  btc: 'https://mempool.space/address/',
+  ltc: 'https://litecoinspace.org/address/',
+};
+
+export function explorerUrl(coin) {
+  const base = EXPLORERS[coin];
+  const addr = addressFor(coin);
+  return base && addr ? base + addr : null;
+}
+
 export function isCoinAvailable(coin) {
   return Boolean(addressFor(coin));
 }

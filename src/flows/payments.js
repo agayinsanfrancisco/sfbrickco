@@ -117,19 +117,18 @@ async function sendCryptoInstructions(ctx, chatId, { coin, amountCents, cryptoAm
 
 async function notifyAdminsToConfirm(ctx, { kind, ref, who, amountCents, cryptoAmount, coin, detail }) {
   const c = crypto.COINS[coin];
+  const explorer = crypto.explorerUrl(coin);
+  const rows = [];
+  if (explorer) rows.push([{ text: `🔎 View ${c.ticker} on explorer`, url: explorer }]);
+  rows.push([{ text: '✅ Confirm received', callback_data: `pm:ok:${kind}:${ref}` }]);
   for (const adminId of config.adminIds) {
     try {
       await ctx.bot.sendMessage(
         adminId,
         `🪙 *Crypto payment pending*\n${detail}\nExpect *${cryptoAmount} ${c.ticker}* (≈ ${usd(
           amountCents
-        )}) from ${who}.\nVerify on-chain, then confirm:`,
-        {
-          parse_mode: 'Markdown',
-          reply_markup: {
-            inline_keyboard: [[{ text: '✅ Confirm received', callback_data: `pm:ok:${kind}:${ref}` }]],
-          },
-        }
+        )}) from ${who}.\nCheck the explorer for an incoming tx of that amount, then confirm:`,
+        { parse_mode: 'Markdown', reply_markup: { inline_keyboard: rows } }
       );
     } catch {
       /* admin hasn't opened the bot */
