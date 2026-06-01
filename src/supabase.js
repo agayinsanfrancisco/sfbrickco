@@ -25,14 +25,14 @@ export async function upsertUser({ telegramId, username, fullName }) {
     if (fullName && fullName !== existing.full_name) patch.full_name = fullName;
     // Never demote an expert to customer automatically, but always honor admin list.
     if (wantAdmin && existing.role !== 'admin') patch.role = 'admin';
-    if (Object.keys(patch).length === 0) return existing;
+    if (Object.keys(patch).length === 0) return applyBuilderInvite(existing);
     const { data } = await supabase
       .from('users')
       .update(patch)
       .eq('id', existing.id)
       .select('*')
       .single();
-    return data;
+    return applyBuilderInvite(data);
   }
 
   const { data, error } = await supabase
@@ -46,7 +46,46 @@ export async function upsertUser({ telegramId, username, fullName }) {
     .select('*')
     .single();
   if (error) throw error;
-  return data;
+  return applyBuilderInvite(data);
+}
+
+// Promote a user to builder ('expert') if their @handle was pre-invited by an
+// admin. Matches case-insensitively; consumes the invite. No-op otherwise.
+export async function applyBuilderInvite(user) {
+  if (!user?.username || user.role === 'admin' || user.role === 'expert') return user;
+  const handle = user.username.toLowerCase();
+  const { data: invite } = await supabase
+    .from('builder_invites')
+    .select('username')
+    .eq('username', handle)
+    .maybeSingle();
+  if (!invite) return user;
+  const { data: updated } = await supabase
+    .from('users')
+    .update({ role: 'expert', active: true })
+    .eq('id', user.id)
+    .select('*')
+    .single();
+  await supabase.from('builder_invites').delete().eq('username', handle);
+  return updated || user;
+}
+
+export async function addBuilderInvite(username) {
+  const handle = String(username).replace(/^@/, '').trim().toLowerCase();
+  if (!handle) return null;
+  await supabase.from('builder_invites').upsert({ username: handle }, { onConflict: 'username' });
+  return handle;
+}
+
+// A builder's own appointments (accepted/awaiting-payment), upcoming first.
+export async function listBookingsForExpert(expertId) {
+  const { data } = await supabase
+    .from('bookings')
+    .select('*')
+    .eq('expert_id', expertId)
+    .in('status', ['awaiting_payment', 'accepted'])
+    .order('slot_start', { ascending: true });
+  return data || [];
 }
 
 export async function getUserByTelegramId(telegramId) {

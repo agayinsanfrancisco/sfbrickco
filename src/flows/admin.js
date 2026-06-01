@@ -10,6 +10,7 @@ import {
   setBookingSurcharge,
   getUserByTelegramId,
   getUserById,
+  addBuilderInvite,
   listInventory,
   setStock,
 } from '../supabase.js';
@@ -54,35 +55,24 @@ export async function promptAddExpert(ctx, chatId, telegramId) {
   ctx.sessions.set(chatId, { flow: 'admin', step: 'awaiting_add_expert' });
   await ctx.bot.sendMessage(
     chatId,
-    'Send the *Telegram numeric ID* of the user to make a LEGO expert.\n' +
-      '(They must have tapped /start at least once.)',
+    'Send the builder’s *@handle* (Telegram username).\n' +
+      'They’ll become an active builder the moment they open the bot and tap /builder.',
     { parse_mode: 'Markdown' }
   );
 }
 
 export async function doAddExpert(ctx, chatId, text) {
   ctx.sessions.delete(chatId);
-  const id = Number.parseInt(String(text).trim(), 10);
-  if (Number.isNaN(id)) {
-    await ctx.bot.sendMessage(chatId, 'That’s not a valid numeric Telegram ID.');
+  const handle = await addBuilderInvite(text);
+  if (!handle) {
+    await ctx.bot.sendMessage(chatId, 'That doesn’t look like a valid @handle. Try again.');
     return;
   }
-  const existing = await getUserByTelegramId(id);
-  if (!existing) {
-    await ctx.bot.sendMessage(chatId, 'No user with that ID has started the bot yet.');
-    return;
-  }
-  const updated = await setRole(id, 'expert');
-  await setActive(id, true);
   await ctx.bot.sendMessage(
     chatId,
-    `✅ ${updated.full_name || updated.username || id} is now an active expert.`
+    `✅ Invited *@${handle}* as a builder. They’ll be activated automatically when they open the bot and tap /builder.`,
+    { parse_mode: 'Markdown' }
   );
-  try {
-    await ctx.bot.sendMessage(id, '🛠️ You’ve been added as a Heaux SF LEGO expert! Tap /start.');
-  } catch {
-    /* user hasn't opened the bot; ignore */
-  }
 }
 
 export async function promptRemove(ctx, chatId, telegramId) {

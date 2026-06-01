@@ -7,6 +7,7 @@ import {
   getBooking,
   listExperts,
   setUserAddress,
+  listBookingsForExpert,
 } from '../supabase.js';
 import { estimateBetween } from '../uber.js';
 import { expertJobKeyboard } from '../lib/keyboards.js';
@@ -64,6 +65,48 @@ export async function doSetAddress(ctx, chatId, telegramId, text) {
     chatId,
     updated ? `✅ Base address saved: ${updated.address}` : 'Could not save your address.'
   );
+}
+
+// The builder portal (/builder): shows their appointments + entry points.
+export async function builderPortal(ctx, chatId, telegramId) {
+  const user = await getUserByTelegramId(telegramId);
+  if (!user || (user.role !== 'expert' && user.role !== 'admin')) {
+    await ctx.bot.sendMessage(
+      chatId,
+      '👷 You’re not registered as a builder yet. Ask the admin to add your @handle, then tap /builder again.'
+    );
+    return;
+  }
+  if (!user.active) {
+    await ctx.bot.sendMessage(chatId, 'Your builder account is currently inactive.');
+    return;
+  }
+
+  const appts = await listBookingsForExpert(user.id);
+  let body = `👷 *Builder portal*\n📍 Base address: ${user.address || '— not set —'}\n\n`;
+  if (!appts.length) {
+    body += 'You have no upcoming appointments. Tap *Open jobs* to accept one.';
+  } else {
+    body += '*Your appointments:*';
+    for (const b of appts) {
+      const cust = await getUserByTelegramId(b.customer_telegram_id);
+      const who = cust?.username ? `@${cust.username}` : `id ${b.customer_telegram_id}`;
+      const pay = b.payment_status === 'paid' ? '✅ paid' : '⏳ awaiting payment';
+      body +=
+        `\n\n🕑 ${fmtHourRange(b.slot_start, b.slot_end)}\n` +
+        `📍 ${b.customer_address}\n👤 ${who}\n` +
+        `💵 ${usd(b.total_cents)} — service ${usd(b.service_fee_cents)} + travel ${usd(b.surcharge_cents)} (${pay})`;
+    }
+  }
+  await ctx.bot.sendMessage(chatId, body, {
+    parse_mode: 'Markdown',
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '📋 Open jobs', callback_data: 'exp:list' }],
+        [{ text: '📍 Update my address', callback_data: 'exp:addr' }],
+      ],
+    },
+  });
 }
 
 export async function listJobs(ctx, chatId, telegramId) {

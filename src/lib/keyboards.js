@@ -99,7 +99,7 @@ export function adminMenu() {
     reply_markup: {
       inline_keyboard: [
         [{ text: '👥 List users', callback_data: 'adm:users' }],
-        [{ text: '➕ Add expert', callback_data: 'adm:addexpert' }],
+        [{ text: '➕ Add builder', callback_data: 'adm:addexpert' }],
         [{ text: '➖ Remove user', callback_data: 'adm:remove' }],
         [{ text: '📋 Pending bookings', callback_data: 'adm:bookings' }],
         [{ text: '📦 Inventory', callback_data: 'adm:inv' }],

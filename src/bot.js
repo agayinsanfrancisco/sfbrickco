@@ -46,7 +46,18 @@ export function createBot() {
 
   bot.onText(/^\/shop/, (msg) => shop.startShop(ctx, msg.chat.id));
   bot.onText(/^\/book/, (msg) => booking.startBooking(ctx, msg.chat.id));
-  bot.onText(/^\/expert/, (msg) => expert.listJobs(ctx, msg.chat.id, msg.from.id));
+  // Builder portal — /builder (and /expert alias). upsertUser applies any
+  // pending @handle invite, promoting the user to builder on first visit.
+  const openBuilderPortal = async (msg) => {
+    await upsertUser({
+      telegramId: msg.from.id,
+      username: msg.from.username,
+      fullName: [msg.from.first_name, msg.from.last_name].filter(Boolean).join(' '),
+    });
+    await expert.builderPortal(ctx, msg.chat.id, msg.from.id);
+  };
+  bot.onText(/^\/builder/, openBuilderPortal);
+  bot.onText(/^\/expert/, openBuilderPortal);
   bot.onText(/^\/admin/, (msg) => admin.showMenu(ctx, msg.chat.id, msg.from.id));
 
   bot.onText(/^\/skip/, async (msg) => {
