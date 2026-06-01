@@ -107,6 +107,10 @@ export async function builderPortal(ctx, chatId, telegramId) {
       ],
     },
   });
+
+  // First-visit nudge: a builder can't accept jobs without a base address, so
+  // prompt for it immediately if it isn't set yet.
+  if (!user.address) await promptSetAddress(ctx, chatId, telegramId);
 }
 
 export async function listJobs(ctx, chatId, telegramId) {
