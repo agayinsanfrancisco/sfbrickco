@@ -1,23 +1,23 @@
 import { config, isAdminId } from '../config.js';
 import * as crypto from '../crypto.js';
-import { priceForQty, RED_BRICK_SKU } from '../lib/pricing.js';
 import { usd, fmtHourRange } from '../lib/format.js';
 import {
-  createOrder,
   getOrder,
   markOrderPaid,
+  updateOrderCrypto,
+  markOrderDispatched,
+  decrementStock,
+  getProduct,
   getBooking,
   markBookingPaid,
   setBookingCrypto,
-  getInventory,
-  decrementStock,
   nextDerivationIndex,
 } from '../supabase.js';
 import { notifyExpertsOfBooking } from './expert.js';
 
-// Crypto-only payments (BTC/LTC). When an xpub is configured for a coin, each
-// order gets a unique derived address and the background watcher auto-confirms
-// it on-chain. Otherwise we fall back to a static address + manual admin confirm.
+// Crypto-only payments (BTC/LTC). With an xpub configured, each order gets a
+// unique derived address and the watcher auto-confirms on-chain; otherwise a
+// static address + manual admin confirmation is used.
 
 function methodButtons(kind, ref) {
   const rows = [];
@@ -28,33 +28,20 @@ function methodButtons(kind, ref) {
   return rows;
 }
 
-export async function presentOrderMethods(ctx, chatId, qty) {
-  if (!Number.isInteger(qty) || qty <= 0) {
-    await ctx.bot.sendMessage(chatId, 'Please send a whole number greater than 0.');
-    return;
-  }
-  ctx.sessions.delete(chatId);
-  const inv = await getInventory(RED_BRICK_SKU);
-  const stock = inv?.stock_qty ?? 0;
-  if (stock < qty) {
-    await ctx.bot.sendMessage(
-      chatId,
-      stock === 0
-        ? '😔 Red bricks are currently sold out. Please check back soon!'
-        : `Only *${stock}* red brick${stock === 1 ? '' : 's'} in stock right now. Try a smaller quantity.`,
-      { parse_mode: 'Markdown' }
-    );
-    return;
-  }
-  const amount = priceForQty(qty);
-  const rows = methodButtons('o', qty);
+// Order row already created (with delivery + contact). Show totals + methods.
+export async function presentOrderMethods(ctx, chatId, order, product) {
+  const total = order.amount_cents + order.delivery_fee_cents;
+  const rows = methodButtons('o', order.id);
   if (!rows.length) {
     await ctx.bot.sendMessage(chatId, '🛒 Payments aren’t live yet — please check back soon!');
     return;
   }
   await ctx.bot.sendMessage(
     chatId,
-    `🧾 *${qty} × red brick* — total *${usd(amount)}*\nPay with crypto:`,
+    `🧾 *${order.qty} × ${product?.name || order.sku}*\n` +
+      `• Items: ${usd(order.amount_cents)}\n` +
+      `• Courier delivery: ${usd(order.delivery_fee_cents)}\n` +
+      `• *Total: ${usd(total)}*\nPay with crypto:`,
     { parse_mode: 'Markdown', reply_markup: { inline_keyboard: rows } }
   );
 }
@@ -85,7 +72,6 @@ export async function presentBookingMethods(ctx, chatId, bookingId) {
 }
 
 // ── Issuing a payment ────────────────────────────────────────────────
-// Allocate a derived address (auto-confirm) or fall back to the static one.
 async function allocateAddress(coin) {
   if (crypto.hasXpub(coin)) {
     const index = await nextDerivationIndex(coin);
@@ -136,53 +122,54 @@ async function notifyAdminsToConfirm(ctx, { kind, ref, address, coin, amountCent
   }
 }
 
-export async function payOrderCrypto(ctx, chatId, telegramId, coin, qty) {
+export async function payOrderCrypto(ctx, chatId, telegramId, coin, orderId) {
   if (!crypto.isCoinAvailable(coin)) {
     await ctx.bot.sendMessage(chatId, 'That coin isn’t available right now.');
     return;
   }
-  const inv = await getInventory(RED_BRICK_SKU);
-  if ((inv?.stock_qty ?? 0) < qty) {
-    await ctx.bot.sendMessage(chatId, '😔 That quantity is no longer in stock. Please try again.');
+  const order = await getOrder(orderId);
+  if (!order || order.status !== 'pending') {
+    await ctx.bot.sendMessage(chatId, 'That order is no longer awaiting payment.');
     return;
   }
-  const amountCents = priceForQty(qty);
+  const product = await getProduct(order.sku);
+  if ((product?.stock_qty ?? 0) < order.qty) {
+    await ctx.bot.sendMessage(chatId, '😔 That item is no longer in stock. Please start a new order.');
+    return;
+  }
+  const total = order.amount_cents + order.delivery_fee_cents;
   let cryptoAmount;
   try {
-    cryptoAmount = await crypto.quote(coin, amountCents);
+    cryptoAmount = await crypto.quote(coin, total);
   } catch {
     await ctx.bot.sendMessage(chatId, '⚠️ Couldn’t fetch the exchange rate. Please try again shortly.');
     return;
   }
   const { address, index, auto } = await allocateAddress(coin);
-  const order = await createOrder({
-    telegramId,
-    qty,
-    amountCents,
+  await updateOrderCrypto(orderId, {
     paymentMethod: coin,
     cryptoAmount,
     payCoin: coin,
-    // Only store the address for watching when it's a unique derived one.
     payAddress: auto ? address : null,
     payIndex: index,
   });
   await sendCryptoInstructions(ctx, chatId, {
     coin,
     address,
-    amountCents,
+    amountCents: total,
     cryptoAmount,
     auto,
     kind: 'o',
-    ref: order.id,
+    ref: orderId,
   });
   await notifyAdminsToConfirm(ctx, {
     kind: 'o',
-    ref: order.id,
+    ref: orderId,
     address,
     coin,
-    amountCents,
+    amountCents: total,
     cryptoAmount,
-    detail: `Order: ${qty} × red brick`,
+    detail: `Order: ${order.qty} × ${product?.name || order.sku} → ${order.delivery_address}`,
     auto,
   });
 }
@@ -247,24 +234,32 @@ export async function customerSent(ctx, chatId, kind, ref) {
   }
 }
 
-// ── Fulfillment (shared by the watcher and the manual admin button) ──
-// markOrderPaid/markBookingPaid are conditional, so these are idempotent.
+// ── Fulfillment (shared by watcher + manual admin button) ────────────
 export async function confirmOrder(ctx, order, { auto = false } = {}) {
   const paid = await markOrderPaid(order.id);
   if (!paid) return false; // already confirmed
-  const remaining = await decrementStock(RED_BRICK_SKU, order.qty);
+  const remaining = await decrementStock(order.sku, order.qty);
   try {
-    await ctx.bot.sendMessage(order.telegram_id, '✅ Payment confirmed! Your red bricks are on the way.');
+    await ctx.bot.sendMessage(
+      order.telegram_id,
+      '✅ Payment confirmed! We’re preparing your order for courier delivery.'
+    );
   } catch {
     /* ignore */
   }
+  const detail =
+    `📦 *Paid order — ready to dispatch*\n` +
+    `${order.qty} × ${order.sku}\n` +
+    `📍 ${order.delivery_address}\n` +
+    `📞 ${order.contact_phone || '—'}${order.contact_handle ? ` (@${order.contact_handle})` : ''}\n` +
+    `Delivery fee ${usd(order.delivery_fee_cents)} · paid ${auto ? 'auto/on-chain' : 'manual'}` +
+    (remaining ? `\nStock now ${remaining.stock_qty}.` : '');
   for (const adminId of config.adminIds) {
     try {
-      await ctx.bot.sendMessage(
-        adminId,
-        `✅ Order ${order.id} paid (${auto ? 'auto/on-chain' : 'manual'}). ` +
-          (remaining ? `Stock now ${remaining.stock_qty}.` : '⚠️ stock check needed.')
-      );
+      await ctx.bot.sendMessage(adminId, detail, {
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: [[{ text: '🚚 Accept & dispatch', callback_data: `pm:disp:${order.id}` }]] },
+      });
     } catch {
       /* ignore */
     }
@@ -276,16 +271,13 @@ export async function confirmBooking(ctx, booking, { auto = false } = {}) {
   const paid = await markBookingPaid(booking.id);
   if (!paid) return false;
   try {
-    await ctx.bot.sendMessage(
-      paid.customer_telegram_id,
-      '✅ Payment confirmed! Finding you a LEGO expert now…'
-    );
+    await ctx.bot.sendMessage(paid.customer_telegram_id, '✅ Payment confirmed! Finding you a LEGO expert now…');
   } catch {
     /* ignore */
   }
   for (const adminId of config.adminIds) {
     try {
-      await ctx.bot.sendMessage(adminId, `✅ Booking ${booking.id} paid (${auto ? 'auto/on-chain' : 'manual'}); experts notified.`);
+      await ctx.bot.sendMessage(adminId, `✅ Booking ${booking.id} paid (${auto ? 'auto' : 'manual'}); experts notified.`);
     } catch {
       /* ignore */
     }
@@ -294,7 +286,7 @@ export async function confirmBooking(ctx, booking, { auto = false } = {}) {
   return true;
 }
 
-// Manual admin override (static-address path, or if the watcher misses).
+// Manual admin override (static path, or if the watcher misses).
 export async function adminConfirm(ctx, chatId, telegramId, kind, ref) {
   if (!isAdminId(telegramId)) {
     await ctx.bot.sendMessage(chatId, 'Admins only.');
@@ -310,5 +302,32 @@ export async function adminConfirm(ctx, chatId, telegramId, kind, ref) {
     if (!booking) return ctx.bot.sendMessage(chatId, 'Booking not found.');
     const ok = await confirmBooking(ctx, booking, { auto: false });
     await ctx.bot.sendMessage(chatId, ok ? '✅ Confirmed.' : 'Already confirmed.');
+  }
+}
+
+// Admin accepts a paid order → dispatch the courier.
+// Uber Direct auto-dispatch is not wired yet (needs merchant credentials), so
+// for now we mark dispatched and hand the admin the delivery details.
+export async function adminDispatch(ctx, chatId, telegramId, orderId) {
+  if (!isAdminId(telegramId)) {
+    await ctx.bot.sendMessage(chatId, 'Admins only.');
+    return;
+  }
+  const o = await markOrderDispatched(orderId);
+  if (!o) {
+    await ctx.bot.sendMessage(chatId, 'That order isn’t in a paid/dispatchable state.');
+    return;
+  }
+  // TODO(uber-direct): createDelivery({ pickup: store, dropoff: o.delivery_address, phone: o.contact_phone })
+  await ctx.bot.sendMessage(
+    chatId,
+    `🚚 *Dispatching ${o.qty} × ${o.sku}*\n📍 ${o.delivery_address}\n📞 ${o.contact_phone || '—'}\n\n` +
+      `⚠️ Auto-dispatch via Uber Direct isn’t connected yet — request the courier manually for now.`,
+    { parse_mode: 'Markdown' }
+  );
+  try {
+    await ctx.bot.sendMessage(o.telegram_id, '🚚 Your order is out for delivery!');
+  } catch {
+    /* ignore */
   }
 }

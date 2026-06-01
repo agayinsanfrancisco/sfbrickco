@@ -45,6 +45,7 @@ export const config = {
   uber: {
     baseCents: int('UBER_BASE_CENTS', 500),
     perMileCents: int('UBER_PER_MILE_CENTS', 200),
+    flatFallbackCents: int('UBER_FLAT_FALLBACK_CENTS', 1500),
     originLat: Number.parseFloat(process.env.CIVIC_CENTER_LAT || '37.7793'),
     originLng: Number.parseFloat(process.env.CIVIC_CENTER_LNG || '-122.4193'),
     nominatimUrl:

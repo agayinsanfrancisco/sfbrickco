@@ -59,15 +59,29 @@ export function createBot() {
 
   // ── Free-text (multi-step flow input) ────────────────────────────────
   bot.on('message', async (msg) => {
-    if (!msg.text || msg.text.startsWith('/')) return; // commands handled above
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
     const s = sessions.get(chatId);
+
+    // Shared-contact replies (phone number) have no text.
+    if (msg.contact && s?.flow === 'shop' && s.step === 'awaiting_phone') {
+      try {
+        await shop.receivePhone(ctx, chatId, telegramId, msg.contact.phone_number, msg.from.username);
+      } catch (err) {
+        console.error('contact handler error:', err);
+      }
+      return;
+    }
+    if (!msg.text || msg.text.startsWith('/')) return; // commands handled above
     if (!s) return;
 
     try {
       if (s.flow === 'shop' && s.step === 'awaiting_qty') {
-        await shop.checkout(ctx, chatId, telegramId, Number.parseInt(msg.text.trim(), 10));
+        await shop.chooseQty(ctx, chatId, Number.parseInt(msg.text.trim(), 10));
+      } else if (s.flow === 'shop' && s.step === 'awaiting_delivery_address') {
+        await shop.receiveDeliveryAddress(ctx, chatId, telegramId, msg.text.trim());
+      } else if (s.flow === 'shop' && s.step === 'awaiting_phone') {
+        await shop.receivePhone(ctx, chatId, telegramId, msg.text.trim(), msg.from.username);
       } else if (s.flow === 'book' && s.step === 'awaiting_address') {
         await booking.receiveAddress(ctx, chatId, telegramId, msg.text.trim());
       } else if (s.flow === 'admin' && s.step === 'awaiting_add_expert') {
@@ -95,9 +109,13 @@ export function createBot() {
     try {
       // Shop
       if (data === 'shop:start') await shop.startShop(ctx, chatId);
-      else if (data === 'shop:qty:custom') await shop.promptCustomQty(ctx, chatId);
+      else if (data.startsWith('shop:p:')) await shop.chooseProduct(ctx, chatId, sliceAfter(data, 'shop:p:'));
+      else if (data.startsWith('shop:pack:')) {
+        const [sku, qty] = sliceAfter(data, 'shop:pack:').split(':');
+        await shop.choosePack(ctx, chatId, sku, Number.parseInt(qty, 10));
+      } else if (data === 'shop:qty:custom') await shop.promptCustomQty(ctx, chatId);
       else if (data.startsWith('shop:qty:'))
-        await shop.checkout(ctx, chatId, telegramId, Number.parseInt(sliceAfter(data, 'shop:qty:'), 10));
+        await shop.chooseQty(ctx, chatId, Number.parseInt(sliceAfter(data, 'shop:qty:'), 10));
       // Booking
       else if (data === 'book:start') await booking.startBooking(ctx, chatId);
       else if (data.startsWith('book:day:'))
@@ -110,12 +128,11 @@ export function createBot() {
       // Payments (method selection / crypto / admin confirm)
       else if (data.startsWith('pm:')) {
         const p = sliceAfter(data, 'pm:').split(':'); // crypto-only (btc/ltc)
-        if (p[0] === 'o')
-          await payments.payOrderCrypto(ctx, chatId, telegramId, p[1], Number.parseInt(p[2], 10));
-        else if (p[0] === 'b')
-          await payments.payBookingCrypto(ctx, chatId, telegramId, p[1], p[2]);
+        if (p[0] === 'o') await payments.payOrderCrypto(ctx, chatId, telegramId, p[1], p[2]); // p[2]=orderId
+        else if (p[0] === 'b') await payments.payBookingCrypto(ctx, chatId, telegramId, p[1], p[2]);
         else if (p[0] === 'sent') await payments.customerSent(ctx, chatId, p[1], p[2]);
         else if (p[0] === 'ok') await payments.adminConfirm(ctx, chatId, telegramId, p[1], p[2]);
+        else if (p[0] === 'disp') await payments.adminDispatch(ctx, chatId, telegramId, p[1]);
       }
       // Expert
       else if (data === 'exp:list') await expert.listJobs(ctx, chatId, telegramId);

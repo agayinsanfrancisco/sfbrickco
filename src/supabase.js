@@ -103,30 +103,81 @@ export async function listExperts({ activeOnly = true } = {}) {
 // ── Orders (LEGO product sales) ──────────────────────────────────────
 export async function createOrder({
   telegramId,
+  sku,
   qty,
-  amountCents,
-  paymentMethod = 'stripe',
-  cryptoAmount = null,
-  payCoin = null,
-  payAddress = null,
-  payIndex = null,
+  amountCents, // item subtotal (delivery tracked separately)
+  deliveryFeeCents = 0,
+  deliveryAddress = null,
+  contactPhone = null,
+  contactHandle = null,
 }) {
   const { data, error } = await supabase
     .from('orders')
     .insert({
       telegram_id: telegramId,
+      sku,
       qty,
       amount_cents: amountCents,
+      delivery_fee_cents: deliveryFeeCents,
+      delivery_address: deliveryAddress,
+      contact_phone: contactPhone,
+      contact_handle: contactHandle,
+    })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+// Attach the chosen coin + derived address + quoted amount at pay time.
+export async function updateOrderCrypto(id, { paymentMethod, cryptoAmount, payCoin, payAddress, payIndex }) {
+  const { data } = await supabase
+    .from('orders')
+    .update({
       payment_method: paymentMethod,
       crypto_amount: cryptoAmount,
       pay_coin: payCoin,
       pay_address: payAddress,
       pay_index: payIndex,
     })
+    .eq('id', id)
     .select('*')
-    .single();
-  if (error) throw error;
+    .maybeSingle();
   return data;
+}
+
+export async function markOrderDispatched(id) {
+  const { data } = await supabase
+    .from('orders')
+    .update({ status: 'dispatched' })
+    .eq('id', id)
+    .eq('status', 'paid')
+    .select('*')
+    .maybeSingle();
+  return data;
+}
+
+export async function listPaidUndispatchedOrders() {
+  const { data } = await supabase
+    .from('orders')
+    .select('*')
+    .eq('status', 'paid')
+    .order('created_at', { ascending: true });
+  return data || [];
+}
+
+// ── Products (catalog) ───────────────────────────────────────────────
+export async function listProducts() {
+  const { data } = await supabase
+    .from('inventory')
+    .select('*')
+    .eq('active', true)
+    .order('sort', { ascending: true });
+  return data || [];
+}
+
+export async function getProduct(sku) {
+  return getInventory(sku);
 }
 
 // Allocate the next derivation index for a coin (read-modify-write; fine at
