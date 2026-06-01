@@ -42,17 +42,6 @@ export const config = {
       return Boolean(this.btcXpub || this.ltcXpub || this.btcAddress || this.ltcAddress);
     },
   },
-  uberDirect: {
-    clientId: process.env.UBER_DIRECT_CLIENT_ID || '',
-    clientSecret: process.env.UBER_DIRECT_CLIENT_SECRET || '',
-    customerId: process.env.UBER_DIRECT_CUSTOMER_ID || '',
-    pickupName: process.env.UBER_DIRECT_PICKUP_NAME || 'SF Brick Company',
-    pickupAddress: process.env.UBER_DIRECT_PICKUP_ADDRESS || '',
-    pickupPhone: process.env.UBER_DIRECT_PICKUP_PHONE || '',
-    get enabled() {
-      return Boolean(this.clientId && this.clientSecret && this.customerId && this.pickupAddress);
-    },
-  },
   uber: {
     baseCents: int('UBER_BASE_CENTS', 500),
     perMileCents: int('UBER_PER_MILE_CENTS', 200),
