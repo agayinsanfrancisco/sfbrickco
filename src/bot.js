@@ -8,6 +8,7 @@ import * as booking from './flows/booking.js';
 import * as expert from './flows/expert.js';
 import * as admin from './flows/admin.js';
 import * as review from './flows/review.js';
+import * as payments from './flows/payments.js';
 
 export function createBot() {
   const bot = new TelegramBot(config.telegram.token, { polling: true });
@@ -104,6 +105,25 @@ export function createBot() {
       else if (data.startsWith('book:pay:'))
         await booking.payBooking(ctx, chatId, telegramId, sliceAfter(data, 'book:pay:'));
       else if (data === 'book:cancel') await booking.cancelBooking(ctx, chatId);
+      // Payments (method selection / crypto / admin confirm)
+      else if (data.startsWith('pm:')) {
+        const p = sliceAfter(data, 'pm:').split(':');
+        if (p[0] === 'o' || p[0] === 'b') {
+          const [kind, method, ref] = p; // ref: qty (orders) or bookingId (bookings)
+          if (kind === 'o' && method === 'card')
+            await payments.payOrderCard(ctx, chatId, telegramId, Number.parseInt(ref, 10));
+          else if (kind === 'o')
+            await payments.payOrderCrypto(ctx, chatId, telegramId, method, Number.parseInt(ref, 10));
+          else if (kind === 'b' && method === 'card')
+            await payments.payBookingCard(ctx, chatId, telegramId, ref);
+          else if (kind === 'b')
+            await payments.payBookingCrypto(ctx, chatId, telegramId, method, ref);
+        } else if (p[0] === 'sent') {
+          await payments.customerSent(ctx, chatId, p[1], p[2]);
+        } else if (p[0] === 'ok') {
+          await payments.adminConfirm(ctx, chatId, telegramId, p[1], p[2]);
+        }
+      }
       // Expert
       else if (data === 'exp:list') await expert.listJobs(ctx, chatId, telegramId);
       else if (data.startsWith('exp:acc:'))

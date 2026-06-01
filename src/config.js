@@ -41,6 +41,13 @@ export const config = {
     bundleCents: int('LEGO_BUNDLE_PRICE_CENTS', 4500),
     serviceFeeCents: int('SERVICE_FEE_CENTS', 5000),
   },
+  crypto: {
+    btcAddress: process.env.BTC_ADDRESS || '',
+    ltcAddress: process.env.LTC_ADDRESS || '',
+    get enabled() {
+      return Boolean(this.btcAddress || this.ltcAddress);
+    },
+  },
   uber: {
     baseCents: int('UBER_BASE_CENTS', 500),
     perMileCents: int('UBER_PER_MILE_CENTS', 200),

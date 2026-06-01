@@ -1,11 +1,5 @@
 import { config } from '../config.js';
-import {
-  createBooking,
-  attachBookingSession,
-  getBooking,
-  slotTaken,
-} from '../supabase.js';
-import { createBookingCheckout } from '../stripe.js';
+import { createBooking, slotTaken } from '../supabase.js';
 import { estimateSurcharge } from '../uber.js';
 import { upcomingDays, hourlySlots } from '../lib/slots.js';
 import {
@@ -15,6 +9,7 @@ import {
 } from '../lib/keyboards.js';
 import { usd, fmtHourRange } from '../lib/format.js';
 import { notifyAdminsForFare } from './admin.js';
+import { presentBookingMethods } from './payments.js';
 
 export async function startBooking(ctx, chatId) {
   const days = upcomingDays(7);
@@ -123,30 +118,9 @@ export async function receiveAddress(ctx, chatId, telegramId, address) {
   await notifyAdminsForFare(ctx, booking);
 }
 
-export async function payBooking(ctx, chatId, telegramId, bookingId) {
-  if (!config.stripe.enabled) {
-    await ctx.bot.sendMessage(chatId, '💳 Online payments aren’t live yet — please check back soon!');
-    return;
-  }
-  const booking = await getBooking(bookingId);
-  if (!booking) {
-    await ctx.bot.sendMessage(chatId, 'That booking could not be found.');
-    return;
-  }
-  if (booking.surcharge_source === 'pending') {
-    await ctx.bot.sendMessage(
-      chatId,
-      'We’re still confirming the travel surcharge for your address. Hang tight!'
-    );
-    return;
-  }
-  const session = await createBookingCheckout({ booking, telegramId });
-  await attachBookingSession(booking.id, session.id);
-  await ctx.bot.sendMessage(chatId, 'Tap to pay securely via Stripe:', {
-    reply_markup: {
-      inline_keyboard: [[{ text: `Pay ${usd(booking.total_cents)}`, url: session.url }]],
-    },
-  });
+// Customer chose to pay → present available payment methods (card / crypto).
+export async function payBooking(ctx, chatId, _telegramId, bookingId) {
+  await presentBookingMethods(ctx, chatId, bookingId);
 }
 
 export function cancelBooking(ctx, chatId) {

@@ -101,13 +101,30 @@ export async function listExperts({ activeOnly = true } = {}) {
 }
 
 // ── Orders (LEGO product sales) ──────────────────────────────────────
-export async function createOrder({ telegramId, qty, amountCents }) {
+export async function createOrder({
+  telegramId,
+  qty,
+  amountCents,
+  paymentMethod = 'stripe',
+  cryptoAmount = null,
+}) {
   const { data, error } = await supabase
     .from('orders')
-    .insert({ telegram_id: telegramId, qty, amount_cents: amountCents })
+    .insert({
+      telegram_id: telegramId,
+      qty,
+      amount_cents: amountCents,
+      payment_method: paymentMethod,
+      crypto_amount: cryptoAmount,
+    })
     .select('*')
     .single();
   if (error) throw error;
+  return data;
+}
+
+export async function getOrder(id) {
+  const { data } = await supabase.from('orders').select('*').eq('id', id).maybeSingle();
   return data;
 }
 
@@ -145,6 +162,16 @@ export async function attachBookingSession(bookingId, sessionId) {
 
 export async function getBooking(id) {
   const { data } = await supabase.from('bookings').select('*').eq('id', id).maybeSingle();
+  return data;
+}
+
+export async function setBookingCrypto(id, { paymentMethod, cryptoAmount }) {
+  const { data } = await supabase
+    .from('bookings')
+    .update({ payment_method: paymentMethod, crypto_amount: cryptoAmount })
+    .eq('id', id)
+    .select('*')
+    .maybeSingle();
   return data;
 }
 
