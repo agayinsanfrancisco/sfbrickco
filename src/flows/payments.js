@@ -14,6 +14,7 @@ import {
   nextDerivationIndex,
 } from '../supabase.js';
 import { notifyExpertsOfBooking } from './expert.js';
+import * as uber from '../uberdirect.js';
 
 // Crypto-only payments (BTC/LTC). With an xpub configured, each order gets a
 // unique derived address and the watcher auto-confirms on-chain; otherwise a
@@ -318,7 +319,32 @@ export async function adminDispatch(ctx, chatId, telegramId, orderId) {
     await ctx.bot.sendMessage(chatId, 'That order isn’t in a paid/dispatchable state.');
     return;
   }
-  // TODO(uber-direct): createDelivery({ pickup: store, dropoff: o.delivery_address, phone: o.contact_phone })
+
+  if (uber.enabled()) {
+    try {
+      const d = await uber.createDelivery({
+        dropoffName: o.contact_handle ? `@${o.contact_handle}` : 'Customer',
+        dropoffAddress: o.delivery_address,
+        dropoffPhone: o.contact_phone,
+        items: [{ name: o.sku, quantity: o.qty }],
+      });
+      const track = d.trackingUrl ? `\nTrack: ${d.trackingUrl}` : '';
+      await ctx.bot.sendMessage(chatId, `🚚 Uber Direct courier requested for ${o.qty} × ${o.sku}.${track}`);
+      try {
+        await ctx.bot.sendMessage(o.telegram_id, `🚚 Your order is out for delivery!${track}`);
+      } catch {
+        /* ignore */
+      }
+    } catch (e) {
+      await ctx.bot.sendMessage(
+        chatId,
+        `⚠️ Uber Direct dispatch failed (${e.message}). Request the courier manually:\n📍 ${o.delivery_address}\n📞 ${o.contact_phone || '—'}`
+      );
+    }
+    return;
+  }
+
+  // No Uber Direct credentials → manual dispatch.
   await ctx.bot.sendMessage(
     chatId,
     `🚚 *Dispatching ${o.qty} × ${o.sku}*\n📍 ${o.delivery_address}\n📞 ${o.contact_phone || '—'}\n\n` +
