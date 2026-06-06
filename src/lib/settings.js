@@ -22,6 +22,18 @@ export async function getIntSetting(key, fallback) {
   return Number.isNaN(n) ? fallback : n;
 }
 
+export async function getBoolSetting(key, fallback) {
+  let map;
+  try {
+    map = await load();
+  } catch {
+    return fallback;
+  }
+  const v = map[key];
+  if (v == null) return fallback;
+  return v === 'on' || v === 'true' || v === '1';
+}
+
 export function invalidateSettings() {
   cache = { at: 0, map: null };
 }

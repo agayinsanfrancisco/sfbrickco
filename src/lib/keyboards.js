@@ -111,6 +111,8 @@ export function adminMenu() {
         [{ text: '📣 Broadcast', callback_data: 'adm:broadcast' }],
         [{ text: '📦 Inventory', callback_data: 'adm:inv' }],
         [{ text: '💲 Fees', callback_data: 'adm:fees' }],
+        [{ text: '🎚️ Features', callback_data: 'adm:features' }],
+        [{ text: '🏷️ Add promo', callback_data: 'adm:addpromo' }],
       ],
     },
   };

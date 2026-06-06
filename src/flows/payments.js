@@ -1,6 +1,7 @@
 import { config, isAdminId } from '../config.js';
 import * as crypto from '../crypto.js';
 import { usd, fmtHourRange, shortRef } from '../lib/format.js';
+import { orderTotalCents, discountFor } from '../lib/money.js';
 import {
   getOrder,
   markOrderPaid,
@@ -18,6 +19,10 @@ import {
   creditBalance,
   setProductActive,
   markOrderDelivered,
+  logEvent,
+  getPromo,
+  redeemPromo,
+  setOrderPromo,
 } from '../supabase.js';
 
 // Crypto-only payments (BTC/LTC). With an xpub configured, each order gets a
@@ -35,25 +40,67 @@ function methodButtons(kind, ref) {
 
 // Order row already created (with delivery + contact). Show totals + methods.
 export async function presentOrderMethods(ctx, chatId, order, product) {
-  const total = order.amount_cents + order.delivery_fee_cents;
+  const total = orderTotalCents(order);
   const rows = [];
   const balance = await getBalance(order.telegram_id);
   if (balance >= total) {
     rows.push([{ text: `💰 Pay from balance (${usd(balance)})`, callback_data: `pm:bal:o:${order.id}` }]);
   }
   rows.push(...methodButtons('o', order.id));
+  if (!order.promo_code) {
+    rows.push([{ text: '🏷️ Have a promo code?', callback_data: `pm:promo:${order.id}` }]);
+  }
   if (!rows.length) {
     await ctx.bot.sendMessage(chatId, '🛒 Payments aren’t live yet — please check back soon!');
     return;
   }
+  const discountLine = order.discount_cents
+    ? `\n• Discount${order.promo_code ? ` (${order.promo_code})` : ''}: −${usd(order.discount_cents)}`
+    : '';
   await ctx.bot.sendMessage(
     chatId,
     `🧾 *${order.qty} × ${product?.name || order.sku}*\n` +
       `• Items: ${usd(order.amount_cents)}\n` +
-      `• Courier delivery: ${usd(order.delivery_fee_cents)}\n` +
+      `• Courier delivery: ${usd(order.delivery_fee_cents)}${discountLine}\n` +
       `• *Total: ${usd(total)}*\nChoose how to pay:`,
     { parse_mode: 'Markdown', reply_markup: { inline_keyboard: rows } }
   );
+}
+
+// Promo: prompt for a code, validate + redeem, store the discount, re-present.
+export async function promptPromo(ctx, chatId, orderId) {
+  ctx.sessions.set(chatId, { flow: 'promo', step: 'awaiting_code', data: { orderId } });
+  await ctx.bot.sendMessage(chatId, '🏷️ Send your promo code (or /start to skip):');
+}
+
+export async function applyPromo(ctx, chatId, code) {
+  const session = ctx.sessions.get(chatId);
+  const orderId = session?.data?.orderId;
+  ctx.sessions.delete(chatId);
+  if (!orderId) return;
+  const order = await getOrder(orderId);
+  if (!order || order.status !== 'pending') {
+    await ctx.bot.sendMessage(chatId, 'That order is no longer awaiting payment.');
+    return;
+  }
+  if (order.promo_code) {
+    await ctx.bot.sendMessage(chatId, 'A code is already applied to this order.');
+    return;
+  }
+  const promo = await getPromo(code);
+  if (!promo || !promo.active) {
+    await ctx.bot.sendMessage(chatId, '❌ That code isn’t valid. Choose how to pay:');
+    return presentOrderMethods(ctx, chatId, order, await getProduct(order.sku));
+  }
+  const discount = discountFor(order.amount_cents, promo);
+  const redeemed = await redeemPromo(code); // atomic: respects active + max_uses
+  if (!redeemed) {
+    await ctx.bot.sendMessage(chatId, '❌ That code is no longer available.');
+    return presentOrderMethods(ctx, chatId, order, await getProduct(order.sku));
+  }
+  const updated = await setOrderPromo(orderId, { code: redeemed.code, discountCents: discount });
+  await ctx.bot.sendMessage(chatId, `✅ Code applied — ${usd(discount)} off.`);
+  await presentOrderMethods(ctx, chatId, updated || order, await getProduct(order.sku));
 }
 
 export async function presentBookingMethods(ctx, chatId, bookingId) {
@@ -171,7 +218,7 @@ export async function payOrderCrypto(ctx, chatId, telegramId, coin, orderId, { r
     await ctx.bot.sendMessage(chatId, '😔 That item is no longer in stock. Please start a new order.');
     return;
   }
-  const total = order.amount_cents + order.delivery_fee_cents;
+  const total = orderTotalCents(order);
 
   // Double-tap / re-show guard: if a still-valid address was already issued for
   // this coin and we're not explicitly refreshing, re-show it instead of
@@ -325,7 +372,7 @@ export async function payOrderFromBalance(ctx, chatId, telegramId, orderId) {
     await ctx.bot.sendMessage(chatId, '😔 That item is no longer in stock. Please start a new order.');
     return;
   }
-  const total = order.amount_cents + order.delivery_fee_cents;
+  const total = orderTotalCents(order);
   const newBalance = await debitBalance(order.telegram_id, total, { refType: 'order', refId: order.id });
   if (newBalance === null) {
     await ctx.bot.sendMessage(chatId, 'Your balance no longer covers this. Tap /wallet to top up.');
@@ -373,6 +420,7 @@ export async function payBookingFromBalance(ctx, chatId, telegramId, bookingId) 
 export async function confirmOrder(ctx, order, { auto = false } = {}) {
   const paid = await markOrderPaid(order.id);
   if (!paid) return false; // already confirmed
+  logEvent(order.telegram_id, 'order_paid', { id: order.id, total: orderTotalCents(order) });
   const remaining = await decrementStock(order.sku, order.qty);
   // Out-of-stock: deactivate the product + alert admins (#14).
   if (remaining && remaining.stock_qty === 0) {

@@ -147,6 +147,10 @@ export function createBot() {
         await review.addComment(ctx, chatId, telegramId, msg.text.trim());
       } else if (s.flow === 'wallet' && s.step === 'awaiting_amount') {
         await wallet.receiveCustomAmount(ctx, chatId, msg.text.trim());
+      } else if (s.flow === 'promo' && s.step === 'awaiting_code') {
+        await payments.applyPromo(ctx, chatId, msg.text.trim());
+      } else if (s.flow === 'admin' && s.step === 'awaiting_add_promo') {
+        await admin.doAddPromo(ctx, chatId, msg.text);
       }
     } catch (err) {
       await reportError(ctx, 'message handler', err);
@@ -194,7 +198,8 @@ export function createBot() {
           // pm:re:<kind>:<coin>:<ref> — re-quote a fresh address/rate
           if (p[1] === 'o') await payments.payOrderCrypto(ctx, chatId, telegramId, p[2], p[3], { refresh: true });
           else if (p[1] === 'b') await payments.payBookingCrypto(ctx, chatId, telegramId, p[2], p[3], { refresh: true });
-        } else if (p[0] === 'sent') await payments.customerSent(ctx, chatId, p[1], p[2]);
+        } else if (p[0] === 'promo') await payments.promptPromo(ctx, chatId, p[1]); // p[1]=orderId
+        else if (p[0] === 'sent') await payments.customerSent(ctx, chatId, p[1], p[2]);
         else if (p[0] === 'ok') await payments.adminConfirm(ctx, chatId, telegramId, p[1], p[2]);
         else if (p[0] === 'disp') await payments.adminDispatch(ctx, chatId, telegramId, p[1]);
         else if (p[0] === 'deliv') await payments.adminDelivered(ctx, chatId, telegramId, p[1]);
@@ -253,6 +258,10 @@ export function createBot() {
       else if (data.startsWith('adm:price:'))
         await admin.promptSetPrice(ctx, chatId, telegramId, sliceAfter(data, 'adm:price:'));
       else if (data === 'adm:addsku') await admin.promptAddSku(ctx, chatId, telegramId);
+      else if (data === 'adm:features') await admin.showFeatures(ctx, chatId, telegramId);
+      else if (data.startsWith('adm:flag:'))
+        await admin.toggleFlag(ctx, chatId, telegramId, sliceAfter(data, 'adm:flag:'));
+      else if (data === 'adm:addpromo') await admin.promptAddPromo(ctx, chatId, telegramId);
       else if (data.startsWith('adm:stock:'))
         await admin.promptSetStock(ctx, chatId, telegramId, sliceAfter(data, 'adm:stock:'));
       else if (data.startsWith('adm:assignto:')) {

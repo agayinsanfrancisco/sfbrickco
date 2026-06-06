@@ -21,11 +21,12 @@ import {
   getInventory,
   setProductPrice,
   createProduct,
+  createPromo,
 } from '../supabase.js';
 import { manualSurchargeCents, estimateBetween } from '../uber.js';
 import { adminMenu } from '../lib/keyboards.js';
 import { usd, fmtHourRange, shortRef } from '../lib/format.js';
-import { getIntSetting, invalidateSettings } from '../lib/settings.js';
+import { getIntSetting, getBoolSetting, invalidateSettings } from '../lib/settings.js';
 
 function ensureAdmin(ctx, chatId, telegramId) {
   if (!isAdminId(telegramId)) {
@@ -406,6 +407,71 @@ export async function doAddSku(ctx, chatId, text) {
     });
   } catch (err) {
     await ctx.bot.sendMessage(chatId, `Couldn’t add it: ${err.message}`);
+  }
+}
+
+// ── Feature flags (#46) ──────────────────────────────────────────────
+const FLAGS = [
+  { key: 'flag_shop', label: 'Shop' },
+  { key: 'flag_booking', label: 'Booking' },
+  { key: 'flag_wallet', label: 'Wallet' },
+];
+
+export async function showFeatures(ctx, chatId, telegramId) {
+  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const states = await Promise.all(FLAGS.map((f) => getBoolSetting(f.key, true)));
+  const rows = FLAGS.map((f, i) => [
+    { text: `${f.label}: ${states[i] ? '🟢 on' : '🔴 off'} — tap to toggle`, callback_data: `adm:flag:${f.key}` },
+  ]);
+  await ctx.bot.sendMessage(chatId, '🎚️ *Features*', { parse_mode: 'Markdown', reply_markup: { inline_keyboard: rows } });
+}
+
+export async function toggleFlag(ctx, chatId, telegramId, key) {
+  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  if (!FLAGS.some((f) => f.key === key)) return;
+  const current = await getBoolSetting(key, true);
+  await setSetting(key, current ? 'off' : 'on');
+  invalidateSettings();
+  await showFeatures(ctx, chatId, telegramId);
+}
+
+// ── Promo codes (#19) ────────────────────────────────────────────────
+export async function promptAddPromo(ctx, chatId, telegramId) {
+  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  ctx.sessions.set(chatId, { flow: 'admin', step: 'awaiting_add_promo' });
+  await ctx.bot.sendMessage(
+    chatId,
+    'Create a promo as `CODE | discount | maxUses?`\n' +
+      '`SAVE10 | 10% | 100`  or  `FIVEOFF | $5`',
+    { parse_mode: 'Markdown' }
+  );
+}
+
+export async function doAddPromo(ctx, chatId, text) {
+  ctx.sessions.delete(chatId);
+  const [code, disc, maxUses] = String(text).split('|').map((s) => s.trim());
+  if (!code || !disc) {
+    await ctx.bot.sendMessage(chatId, 'Format: `CODE | 10% | 100` or `CODE | $5`', { parse_mode: 'Markdown' });
+    return;
+  }
+  const fields = { code, maxUses: maxUses ? Number.parseInt(maxUses, 10) || null : null };
+  if (disc.includes('%')) {
+    fields.percentOff = Number.parseInt(disc.replace(/[^0-9]/g, ''), 10);
+  } else {
+    fields.amountOffCents = Math.round(Number.parseFloat(disc.replace(/[^0-9.]/g, '')) * 100);
+  }
+  if (!fields.percentOff && !fields.amountOffCents) {
+    await ctx.bot.sendMessage(chatId, 'Couldn’t parse the discount. Try `10%` or `$5`.', { parse_mode: 'Markdown' });
+    return;
+  }
+  try {
+    const p = await createPromo(fields);
+    const amt = p.percent_off ? `${p.percent_off}% off` : `${usd(p.amount_off_cents)} off`;
+    await ctx.bot.sendMessage(chatId, `✅ Promo *${p.code}* (${amt})${p.max_uses ? `, max ${p.max_uses} uses` : ''}.`, {
+      parse_mode: 'Markdown',
+    });
+  } catch (err) {
+    await ctx.bot.sendMessage(chatId, `Couldn’t create it: ${err.message}`);
   }
 }
 

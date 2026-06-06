@@ -2,6 +2,7 @@ import { config } from '../config.js';
 import * as crypto from '../crypto.js';
 import { usd } from '../lib/format.js';
 import { getBalance, listLedger, createDeposit, nextDerivationIndex } from '../supabase.js';
+import { getBoolSetting } from '../lib/settings.js';
 
 // USD store credit (spend-only). Deposits reuse the order crypto rails: a
 // unique derived address per top-up, auto-credited by the watcher. Requires an
@@ -10,6 +11,10 @@ const PRESETS = [2500, 5000, 10000]; // $25 / $50 / $100
 const MIN_CENTS = 500;
 
 export async function showWallet(ctx, chatId, telegramId) {
+  if (!(await getBoolSetting('flag_wallet', true))) {
+    await ctx.bot.sendMessage(chatId, '💰 The wallet is temporarily unavailable.');
+    return;
+  }
   const balance = await getBalance(telegramId);
   await ctx.bot.sendMessage(
     chatId,

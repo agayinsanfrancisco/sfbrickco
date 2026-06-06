@@ -3,7 +3,7 @@ import { createBooking, slotTaken, listActiveAvailability } from '../supabase.js
 import { upcomingDays, hourlySlots, isCovered } from '../lib/slots.js';
 import { daysKeyboard, hoursKeyboard } from '../lib/keyboards.js';
 import { usd, fmtHourRange } from '../lib/format.js';
-import { getIntSetting } from '../lib/settings.js';
+import { getIntSetting, getBoolSetting } from '../lib/settings.js';
 import { presentBookingMethods } from './payments.js';
 import { notifyExpertsOfOpenBooking } from './expert.js';
 
@@ -13,6 +13,10 @@ export function serviceFeeCents() {
 }
 
 export async function startBooking(ctx, chatId) {
+  if (!(await getBoolSetting('flag_booking', true))) {
+    await ctx.bot.sendMessage(chatId, '🛠️ Bookings are paused right now — check back soon!');
+    return;
+  }
   const days = upcomingDays(7);
   await ctx.bot.sendMessage(
     chatId,

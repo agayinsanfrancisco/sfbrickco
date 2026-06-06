@@ -46,6 +46,9 @@ create table if not exists orders (
   refund_txid        text,                       -- refund record (#37)
   refunded_at        timestamptz,
   idempotency_key    text,                       -- dedupe double-submits (#48)
+  discount_cents     int not null default 0,     -- promo discount (#19)
+  promo_code         text,
+  items              jsonb,                       -- multi-item cart line items (#17)
   created_at         timestamptz not null default now()
 );
 create unique index if not exists orders_idempotency_key_uq
@@ -188,6 +191,29 @@ create table if not exists deposits (
 create index if not exists deposits_status_created_idx on deposits (status, created_at);
 alter table deposits enable row level security;
 
+-- ── Promo codes (#19) ────────────────────────────────────────────────
+create table if not exists promo_codes (
+  code             text primary key,
+  percent_off      int check (percent_off between 0 and 100),
+  amount_off_cents int,
+  active           boolean not null default true,
+  max_uses         int,
+  uses             int not null default 0,
+  created_at       timestamptz not null default now()
+);
+alter table promo_codes enable row level security;
+
+-- ── Analytics events (#49) ───────────────────────────────────────────
+create table if not exists events (
+  id          uuid primary key default gen_random_uuid(),
+  telegram_id bigint,
+  kind        text not null,
+  meta        jsonb,
+  created_at  timestamptz not null default now()
+);
+create index if not exists events_kind_created_idx on events (kind, created_at);
+alter table events enable row level security;
+
 -- ── Atomic functions ─────────────────────────────────────────────────
 
 -- Allocate the next BIP84 derivation index for a coin (atomic upsert+increment).
@@ -258,4 +284,15 @@ begin
   insert into ledger (telegram_id, delta_cents, kind, ref_type, ref_id, balance_after)
   values (p_telegram_id, -p_amount_cents, 'purchase', p_ref_type, p_ref_id, v_new);
   return v_new;
+end; $$;
+
+-- Promo: atomically redeem (active + under max_uses); returns the row or null.
+create or replace function redeem_promo(p_code text)
+returns promo_codes language plpgsql as $$
+declare r promo_codes;
+begin
+  update promo_codes set uses = uses + 1
+   where code = p_code and active = true and (max_uses is null or uses < max_uses)
+  returning * into r;
+  return r;
 end; $$;

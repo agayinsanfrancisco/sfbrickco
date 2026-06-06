@@ -1,12 +1,19 @@
 import { config } from '../config.js';
-import { listProducts, getProduct, createOrder, lastDeliveryAddress } from '../supabase.js';
+import { listProducts, getProduct, createOrder, lastDeliveryAddress, logEvent } from '../supabase.js';
 import { priceForProduct, packOptions } from '../lib/pricing.js';
 import { estimateSurcharge } from '../uber.js';
 import { qtyKeyboard } from '../lib/keyboards.js';
 import { usd, shortRef } from '../lib/format.js';
+import { getBoolSetting, getIntSetting } from '../lib/settings.js';
+import { deliveryAfterThreshold } from '../lib/money.js';
 import { presentOrderMethods } from './payments.js';
 
 export async function startShop(ctx, chatId) {
+  if (!(await getBoolSetting('flag_shop', true))) {
+    await ctx.bot.sendMessage(chatId, '🛒 The shop is closed right now — check back soon!');
+    return;
+  }
+  logEvent(chatId, 'shop_start');
   const products = await listProducts();
   if (!products.length) {
     await ctx.bot.sendMessage(chatId, '🧱 The shop is being restocked — check back soon!');
@@ -157,17 +164,21 @@ async function finalizeOrder(ctx, chatId, telegramId, note) {
   ctx.sessions.delete(chatId);
   const p = await getProduct(s.sku);
   const itemCents = priceForProduct(p, s.qty);
+  // Free-delivery threshold (#45): 0 = disabled.
+  const threshold = await getIntSetting('free_delivery_threshold_cents', 0);
+  const deliveryFee = deliveryAfterThreshold(itemCents, s.deliveryFee, threshold);
   const order = await createOrder({
     telegramId,
     sku: s.sku,
     qty: s.qty,
     amountCents: itemCents,
-    deliveryFeeCents: s.deliveryFee,
+    deliveryFeeCents: deliveryFee,
     deliveryAddress: s.address,
     contactPhone: s.phone,
     contactHandle: s.handle,
     notes: note,
   });
+  logEvent(telegramId, 'order_created', { sku: s.sku, qty: s.qty, cents: itemCents });
   await ctx.bot.sendMessage(chatId, `✅ Order *${shortRef(order.id)}* created — thanks!`, {
     parse_mode: 'Markdown',
     reply_markup: { remove_keyboard: true },

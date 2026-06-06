@@ -649,6 +649,60 @@ export async function listInventory() {
   return data || [];
 }
 
+// ── Analytics events (#49) ───────────────────────────────────────────
+export async function logEvent(telegramId, kind, meta = null) {
+  try {
+    await supabase.from('events').insert({ telegram_id: telegramId, kind, meta });
+  } catch {
+    /* analytics must never break a flow */
+  }
+}
+
+// ── Promo codes (#19) ────────────────────────────────────────────────
+export async function getPromo(code) {
+  const { data } = await supabase
+    .from('promo_codes')
+    .select('*')
+    .eq('code', String(code).trim().toLowerCase())
+    .maybeSingle();
+  return data;
+}
+
+// Atomically increment uses (active + under max_uses); returns the row or null.
+export async function redeemPromo(code) {
+  const { data, error } = await supabase.rpc('redeem_promo', {
+    p_code: String(code).trim().toLowerCase(),
+  });
+  if (error) throw error;
+  return data ?? null;
+}
+
+export async function setOrderPromo(orderId, { code, discountCents }) {
+  const { data } = await supabase
+    .from('orders')
+    .update({ promo_code: code, discount_cents: discountCents })
+    .eq('id', orderId)
+    .eq('status', 'pending')
+    .select('*')
+    .maybeSingle();
+  return data;
+}
+
+export async function createPromo({ code, percentOff = null, amountOffCents = null, maxUses = null }) {
+  const { data, error } = await supabase
+    .from('promo_codes')
+    .insert({
+      code: String(code).trim().toLowerCase(),
+      percent_off: percentOff,
+      amount_off_cents: amountOffCents,
+      max_uses: maxUses,
+    })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 // ── Settings (admin-editable key/value) (#44) ────────────────────────
 export async function getAllSettings() {
   const { data } = await supabase.from('settings').select('key, value');
