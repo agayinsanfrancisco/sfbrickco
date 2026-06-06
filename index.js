@@ -5,14 +5,19 @@ import {
   listBookingsNeedingReview,
   cancelStalePendingOrders,
   cancelStaleUnpaidBookings,
+  listBookingsNeedingReminder,
+  markReminded,
+  getUserById,
 } from './src/supabase.js';
 import { promptReview } from './src/flows/review.js';
 import { watchOnce } from './src/watcher.js';
 import { log } from './src/lib/log.js';
+import { fmtHourRange } from './src/lib/format.js';
 
 const REVIEW_POLL_MS = 60 * 1000;
 const WATCH_POLL_MS = 60 * 1000;
 const CLEANUP_POLL_MS = 60 * 60 * 1000; // hourly
+const REMINDER_POLL_MS = 15 * 60 * 1000; // every 15 min
 
 function startReviewScheduler(ctx) {
   const tick = async () => {
@@ -61,6 +66,42 @@ function startCleanupSweep() {
   tick();
 }
 
+// Booking reminders (#41): DM customer + builder ~1h before the slot.
+function startReminderScheduler(ctx) {
+  const tick = async () => {
+    try {
+      const now = Date.now();
+      const due = await listBookingsNeedingReminder(
+        new Date(now).toISOString(),
+        new Date(now + 60 * 60 * 1000).toISOString()
+      );
+      for (const b of due) {
+        const when = fmtHourRange(b.slot_start, b.slot_end);
+        try {
+          await ctx.bot.sendMessage(b.customer_telegram_id, `⏰ Reminder: your build-help session is at ${when}.`);
+        } catch {
+          /* ignore */
+        }
+        if (b.expert_id) {
+          const builder = await getUserById(b.expert_id);
+          if (builder) {
+            try {
+              await ctx.bot.sendMessage(builder.telegram_id, `⏰ Reminder: you have a job at ${when} — ${b.customer_address}.`);
+            } catch {
+              /* ignore */
+            }
+          }
+        }
+        await markReminded(b.id);
+      }
+    } catch (err) {
+      log.error(`reminder scheduler error: ${err.message}`);
+    }
+  };
+  setInterval(tick, REMINDER_POLL_MS);
+  tick();
+}
+
 function main() {
   const { bot, ctx } = createBot();
   console.log('🤖 Telegram bot started (long polling).');
@@ -73,6 +114,7 @@ function main() {
   startReviewScheduler(ctx);
   startPaymentWatcher(ctx);
   startCleanupSweep();
+  startReminderScheduler(ctx);
 
   const shutdown = (sig) => {
     console.log(`\n${sig} received, shutting down…`);

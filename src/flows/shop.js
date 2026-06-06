@@ -118,6 +118,13 @@ export async function receiveDeliveryAddress(ctx, chatId, _telegramId, address) 
   const s = ctx.sessions.get(chatId);
   if (!s?.sku) return;
   const est = await estimateSurcharge(address);
+  if (est.ok && est.tooFar) {
+    await ctx.bot.sendMessage(
+      chatId,
+      `😔 That address is ~${est.miles} mi out — beyond our ${config.uber.maxMiles}-mile delivery area. Try another address.`
+    );
+    return; // stay on the address step so they can re-enter
+  }
   const deliveryFee = est.ok ? est.surchargeCents : config.uber.flatFallbackCents;
   ctx.sessions.set(chatId, { ...s, step: 'awaiting_phone', address, deliveryFee });
   await ctx.bot.sendMessage(

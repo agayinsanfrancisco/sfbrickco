@@ -23,27 +23,38 @@ function haversineMiles(lat1, lng1, lat2, lng2) {
   return R_MILES * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+// Geocode cache: addresses repeat (a builder's base address is geocoded on
+// every job), and Nominatim's ToS asks for ≤1 req/s + caching. Keyed by
+// normalized address; entries are effectively immutable so no TTL.
+const geocodeCache = new Map();
+
 // Geocode a free-text address to {lat, lng} using OpenStreetMap Nominatim.
 // Returns null if it can't be resolved.
 async function geocode(address) {
-  const url = `${config.uber.nominatimUrl}?format=json&limit=1&q=${encodeURIComponent(
-    address
-  )}`;
+  const key = String(address).trim().toLowerCase();
+  if (geocodeCache.has(key)) return geocodeCache.get(key);
+  const url = `${config.uber.nominatimUrl}?format=json&limit=1&q=${encodeURIComponent(address)}`;
+  let result = null;
   try {
     const res = await fetch(url, {
       headers: {
-        // Nominatim requires a descriptive User-Agent / contact.
-        'User-Agent': 'heaux-sf-lego-bot/1.0 (contact: ops@heaux.sf)',
+        // Nominatim requires a descriptive User-Agent with contact info.
+        'User-Agent': `sfbrickco-bot/1.0 (contact: ${config.uber.contactEmail})`,
         'Accept-Language': 'en',
       },
+      signal: AbortSignal.timeout(config.uber.geocodeTimeoutMs),
     });
-    if (!res.ok) return null;
-    const rows = await res.json();
-    if (!Array.isArray(rows) || rows.length === 0) return null;
-    return { lat: Number.parseFloat(rows[0].lat), lng: Number.parseFloat(rows[0].lon) };
+    if (res.ok) {
+      const rows = await res.json();
+      if (Array.isArray(rows) && rows.length) {
+        result = { lat: Number.parseFloat(rows[0].lat), lng: Number.parseFloat(rows[0].lon) };
+      }
+    }
   } catch {
-    return null;
+    result = null; // timeout / network — fall back to manual flow
   }
+  if (result) geocodeCache.set(key, result); // only cache successful resolutions
+  return result;
 }
 
 // Option A: estimate the surcharge from distance.
@@ -59,8 +70,10 @@ export async function estimateSurcharge(address) {
 
   const { baseCents, perMileCents } = await rates();
   const surchargeCents = baseCents + Math.round(miles * perMileCents);
+  const rounded = Math.round(miles * 10) / 10;
 
-  return { ok: true, miles: Math.round(miles * 10) / 10, surchargeCents };
+  // Out-of-area cap (#40): caller decides whether to reject.
+  return { ok: true, miles: rounded, surchargeCents, tooFar: miles > config.uber.maxMiles };
 }
 
 // Estimate the surcharge between two free-text addresses (builder → customer).

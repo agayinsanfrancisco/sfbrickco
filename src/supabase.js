@@ -581,6 +581,63 @@ export async function updateReviewComment(bookingId, comment) {
   await supabase.from('reviews').update({ comment }).eq('booking_id', bookingId);
 }
 
+// Average rating + count for a builder (#21).
+export async function expertRatingSummary(expertId) {
+  if (!expertId) return { avg: null, count: 0 };
+  const { data } = await supabase.from('reviews').select('rating').eq('expert_id', expertId);
+  const rows = data || [];
+  if (!rows.length) return { avg: null, count: 0 };
+  const avg = rows.reduce((s, r) => s + r.rating, 0) / rows.length;
+  return { avg: Math.round(avg * 10) / 10, count: rows.length };
+}
+
+// ── Booking reminders (#41) ──────────────────────────────────────────
+export async function listBookingsNeedingReminder(nowIso, soonIso) {
+  const { data } = await supabase
+    .from('bookings')
+    .select('*')
+    .eq('status', 'accepted')
+    .eq('payment_status', 'paid')
+    .eq('reminded', false)
+    .gte('slot_start', nowIso)
+    .lte('slot_start', soonIso);
+  return data || [];
+}
+
+export async function markReminded(id) {
+  await supabase.from('bookings').update({ reminded: true }).eq('id', id);
+}
+
+// ── Expert availability windows (#22) ────────────────────────────────
+export async function getExpertAvailability(expertId) {
+  const { data } = await supabase
+    .from('expert_availability')
+    .select('*')
+    .eq('expert_id', expertId)
+    .order('dow', { ascending: true });
+  return data || [];
+}
+
+// Replace a builder's whole weekly schedule.
+export async function setExpertAvailability(expertId, windows) {
+  await supabase.from('expert_availability').delete().eq('expert_id', expertId);
+  if (windows.length) {
+    await supabase
+      .from('expert_availability')
+      .insert(windows.map((w) => ({ expert_id: expertId, ...w })));
+  }
+}
+
+// All availability for active experts (used to filter slots + notifications).
+export async function listActiveAvailability() {
+  const { data } = await supabase
+    .from('expert_availability')
+    .select('expert_id, dow, start_hour, end_hour, users!inner(active, role)')
+    .eq('users.active', true)
+    .eq('users.role', 'expert');
+  return data || [];
+}
+
 // ── Inventory ────────────────────────────────────────────────────────
 export async function getInventory(sku) {
   const { data } = await supabase.from('inventory').select('*').eq('sku', sku).maybeSingle();

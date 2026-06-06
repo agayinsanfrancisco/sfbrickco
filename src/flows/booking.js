@@ -1,6 +1,6 @@
 import { config } from '../config.js';
-import { createBooking, slotTaken } from '../supabase.js';
-import { upcomingDays, hourlySlots } from '../lib/slots.js';
+import { createBooking, slotTaken, listActiveAvailability } from '../supabase.js';
+import { upcomingDays, hourlySlots, isCovered } from '../lib/slots.js';
 import { daysKeyboard, hoursKeyboard } from '../lib/keyboards.js';
 import { usd, fmtHourRange } from '../lib/format.js';
 import { getIntSetting } from '../lib/settings.js';
@@ -25,12 +25,16 @@ export async function startBooking(ctx, chatId) {
 
 export async function pickDay(ctx, chatId, dateKey) {
   const slots = hourlySlots(dateKey);
+  // Only offer hours a builder is available for (#22). With no schedules set
+  // anywhere, isCovered returns true so all slots show.
+  const avail = await listActiveAvailability();
+  const open = slots.filter((s) => isCovered(avail, s.startIso));
   await ctx.bot.sendMessage(
     chatId,
-    slots.length
+    open.length
       ? 'Pick a 1-hour start time (Pacific):'
-      : 'No remaining slots that day — pick another.',
-    hoursKeyboard(slots)
+      : 'No builders are available that day — try another.',
+    hoursKeyboard(open)
   );
 }
 

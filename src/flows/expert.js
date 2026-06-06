@@ -8,10 +8,21 @@ import {
   listExperts,
   setUserAddress,
   listBookingsForExpert,
+  expertRatingSummary,
+  getExpertAvailability,
+  setExpertAvailability,
 } from '../supabase.js';
 import { estimateBetween } from '../uber.js';
 import { expertJobKeyboard } from '../lib/keyboards.js';
 import { usd, fmtHourRange } from '../lib/format.js';
+import { isCovered } from '../lib/slots.js';
+
+const DOW_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const DOW_LOOKUP = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
+
+function ratingLine(summary) {
+  return summary.count ? `⭐ ${summary.avg} (${summary.count})` : '⭐ no ratings yet';
+}
 
 async function ensureExpert(ctx, chatId, telegramId) {
   const user = await getUserByTelegramId(telegramId);
@@ -83,7 +94,10 @@ export async function builderPortal(ctx, chatId, telegramId) {
   }
 
   const appts = await listBookingsForExpert(user.id);
-  let body = `👷 *Builder portal*\n📍 Base address: ${user.address || '— not set —'}\n\n`;
+  const rating = await expertRatingSummary(user.id);
+  let body =
+    `👷 *Builder portal*\n📍 Base address: ${user.address || '— not set —'}\n` +
+    `${ratingLine(rating)}\n\n`;
   if (!appts.length) {
     body += 'You have no upcoming appointments. Tap *Open jobs* to accept one.';
   } else {
@@ -104,6 +118,7 @@ export async function builderPortal(ctx, chatId, telegramId) {
       inline_keyboard: [
         [{ text: '📋 Open jobs', callback_data: 'exp:list' }],
         [{ text: '📍 Update my address', callback_data: 'exp:addr' }],
+        [{ text: '🗓️ My availability', callback_data: 'exp:avail' }],
       ],
     },
   });
@@ -111,6 +126,53 @@ export async function builderPortal(ctx, chatId, telegramId) {
   // First-visit nudge: a builder can't accept jobs without a base address, so
   // prompt for it immediately if it isn't set yet.
   if (!user.address) await promptSetAddress(ctx, chatId, telegramId);
+}
+
+// ── Availability windows (#22) ───────────────────────────────────────
+function fmtWindows(windows) {
+  if (!windows.length) return '— none set (you’ll be offered all jobs) —';
+  return windows.map((w) => `${DOW_NAMES[w.dow]} ${w.start_hour}:00–${w.end_hour}:00`).join('\n');
+}
+
+export async function showAvailability(ctx, chatId, telegramId) {
+  const user = await ensureExpert(ctx, chatId, telegramId);
+  if (!user) return;
+  const windows = await getExpertAvailability(user.id);
+  ctx.sessions.set(chatId, { flow: 'expert', step: 'awaiting_availability' });
+  await ctx.bot.sendMessage(
+    chatId,
+    `🗓️ *Your weekly availability* (Pacific):\n${fmtWindows(windows)}\n\n` +
+      'Send new windows, one per line as `Day Start End` (24h), e.g.\n' +
+      '`Mon 9 17`\n`Sat 10 14`\n\nSend `clear` to remove all, or /start to keep as-is.',
+    { parse_mode: 'Markdown' }
+  );
+}
+
+export async function doSetAvailability(ctx, chatId, telegramId, text) {
+  ctx.sessions.delete(chatId);
+  const user = await getUserByTelegramId(telegramId);
+  if (!user) return;
+  if (String(text).trim().toLowerCase() === 'clear') {
+    await setExpertAvailability(user.id, []);
+    await ctx.bot.sendMessage(chatId, '✅ Availability cleared — you’ll be offered all jobs.');
+    return;
+  }
+  const windows = [];
+  for (const raw of String(text).split('\n')) {
+    const m = raw.trim().match(/^([A-Za-z]{3})\s+(\d{1,2})\s+(\d{1,2})$/);
+    if (!m) continue;
+    const dow = DOW_LOOKUP[m[1].toLowerCase()];
+    const start = Number.parseInt(m[2], 10);
+    const end = Number.parseInt(m[3], 10);
+    if (dow === undefined || start < 0 || start > 23 || end < 1 || end > 24 || end <= start) continue;
+    windows.push({ dow, start_hour: start, end_hour: end });
+  }
+  if (!windows.length) {
+    await ctx.bot.sendMessage(chatId, 'Couldn’t parse any windows. Example: `Mon 9 17`', { parse_mode: 'Markdown' });
+    return;
+  }
+  await setExpertAvailability(user.id, windows);
+  await ctx.bot.sendMessage(chatId, `✅ Availability saved:\n${fmtWindows(windows)}`, { parse_mode: 'Markdown' });
 }
 
 export async function listJobs(ctx, chatId, telegramId) {
@@ -160,10 +222,11 @@ export async function accept(ctx, chatId, telegramId, bookingId) {
     `✅ You took the job for ${fmtHourRange(accepted.slot_start, accepted.slot_end)}.\n` +
       `📍 ${accepted.customer_address}\nTravel ${usd(surcharge)}. Awaiting customer payment.`
   );
+  const rating = await expertRatingSummary(user.id);
   try {
     await ctx.bot.sendMessage(
       accepted.customer_telegram_id,
-      `🎉 A builder accepted your booking for ${fmtHourRange(accepted.slot_start, accepted.slot_end)}!\n` +
+      `🎉 A builder (${ratingLine(rating)}) accepted your booking for ${fmtHourRange(accepted.slot_start, accepted.slot_end)}!\n` +
         `• Service: ${usd(accepted.service_fee_cents)}\n• Travel: ${usd(surcharge)}\n• *Total: ${usd(total)}*\nTap to pay:`,
       {
         parse_mode: 'Markdown',
@@ -179,10 +242,14 @@ export async function decline(ctx, chatId, _bookingId) {
   await ctx.bot.sendMessage(chatId, 'Skipped — it stays open for other builders.');
 }
 
-// Notify active builders of a new open job (each sees travel from their address).
+// Notify active builders of a new open job (each sees travel from their
+// address). Builders with an availability schedule are only pinged for jobs
+// inside their windows (#22); builders with no schedule get all jobs.
 export async function notifyExpertsOfOpenBooking(ctx, booking) {
   const experts = await listExperts({ activeOnly: true });
   for (const e of experts) {
+    const windows = await getExpertAvailability(e.id);
+    if (windows.length && !isCovered(windows, booking.slot_start)) continue;
     try {
       await ctx.bot.sendMessage(e.telegram_id, `📨 New open job:\n\n${await openJobCard(booking, e)}`, {
         parse_mode: 'Markdown',

@@ -73,6 +73,7 @@ create table if not exists bookings (
                                             'pending', 'accepted', 'declined',
                                             'completed', 'cancelled')),
   review_prompted       boolean not null default false,
+  reminded              boolean not null default false,  -- pre-slot reminder sent (#41)
   -- payment (crypto)
   payment_method        text,
   crypto_amount         text,
@@ -124,6 +125,18 @@ create table if not exists pay_counters (
   coin        text primary key,
   next_index  int not null default 0
 );
+
+-- ── Expert availability windows (weekly, Pacific) ────────────────────
+create table if not exists expert_availability (
+  id          uuid primary key default gen_random_uuid(),
+  expert_id   uuid not null references users(id),
+  dow         int not null check (dow between 0 and 6),     -- 0=Sunday
+  start_hour  int not null check (start_hour between 0 and 23),
+  end_hour    int not null check (end_hour between 1 and 24),
+  created_at  timestamptz not null default now()
+);
+create index if not exists expert_avail_idx on expert_availability (expert_id);
+alter table expert_availability enable row level security;
 
 -- ── Settings (admin-editable key/value) ──────────────────────────────
 create table if not exists settings (

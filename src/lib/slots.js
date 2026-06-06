@@ -19,6 +19,27 @@ export function upcomingDays(_count = 2, now = new Date()) {
   }));
 }
 
+// Pacific weekday (0=Sun) + hour for an ISO timestamp, for availability matching.
+const DOW = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+export function pacificDowHour(iso) {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Los_Angeles',
+    weekday: 'short',
+    hour: 'numeric',
+    hour12: false,
+  }).formatToParts(new Date(iso));
+  const wd = parts.find((p) => p.type === 'weekday')?.value;
+  const hour = Number.parseInt(parts.find((p) => p.type === 'hour')?.value, 10) % 24;
+  return { dow: DOW[wd], hour };
+}
+
+// Is a slot time covered by any of the given availability windows?
+export function isCovered(windows, iso) {
+  if (!windows.length) return true; // no availability configured anywhere → allow all
+  const { dow, hour } = pacificDowHour(iso);
+  return windows.some((w) => w.dow === dow && hour >= w.start_hour && hour < w.end_hour);
+}
+
 // Hourly slots on a day, restricted to (now, now + 24h].
 export function hourlySlots(dateKey, now = new Date()) {
   const lo = now.getTime();

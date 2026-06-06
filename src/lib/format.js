@@ -7,7 +7,8 @@ export function shortRef(id) {
   return `SFB-${String(id).replace(/-/g, '').slice(0, 6).toUpperCase()}`;
 }
 
-// Format an ISO timestamp in Pacific time as e.g. "Mon Jun 2, 3:00 PM".
+// Format an ISO timestamp in Pacific time as e.g. "Mon Jun 2, 3:00 PM PDT".
+// Intl handles PST/PDT automatically, so DST is always correct.
 export function fmtSlot(iso) {
   const d = new Date(iso);
   return d.toLocaleString('en-US', {
@@ -25,5 +26,6 @@ export function fmtHourRange(startIso, endIso) {
     timeZone: 'America/Los_Angeles',
     hour: 'numeric',
     minute: '2-digit',
+    timeZoneName: 'short',
   })}`;
 }

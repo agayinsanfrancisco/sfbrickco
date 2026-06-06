@@ -12,7 +12,7 @@ export async function promptReview(ctx, booking) {
   try {
     await ctx.bot.sendMessage(
       booking.customer_telegram_id,
-      `🧱 How was your LEGO setup session (${fmtHourRange(
+      `🧱 How was your build-help session (${fmtHourRange(
         booking.slot_start,
         booking.slot_end
       )})?\nTap a rating:`,

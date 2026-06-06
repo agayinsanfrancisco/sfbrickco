@@ -57,6 +57,9 @@ export const config = {
     originLng: Number.parseFloat(process.env.CIVIC_CENTER_LNG || '-122.4193'),
     nominatimUrl:
       process.env.NOMINATIM_URL || 'https://nominatim.openstreetmap.org/search',
+    geocodeTimeoutMs: int('GEOCODE_TIMEOUT_MS', 6000),
+    maxMiles: int('MAX_DELIVERY_MILES', 30), // reject out-of-area beyond this
+    contactEmail: process.env.CONTACT_EMAIL || 'ops@sfbrickco.com',
   },
   server: {
     port: int('PORT', 3000),
