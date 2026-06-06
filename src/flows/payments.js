@@ -16,6 +16,8 @@ import {
   getBalance,
   debitBalance,
   creditBalance,
+  setProductActive,
+  markOrderDelivered,
 } from '../supabase.js';
 
 // Crypto-only payments (BTC/LTC). With an xpub configured, each order gets a
@@ -372,6 +374,19 @@ export async function confirmOrder(ctx, order, { auto = false } = {}) {
   const paid = await markOrderPaid(order.id);
   if (!paid) return false; // already confirmed
   const remaining = await decrementStock(order.sku, order.qty);
+  // Out-of-stock: deactivate the product + alert admins (#14).
+  if (remaining && remaining.stock_qty === 0) {
+    await setProductActive(order.sku, false);
+    for (const adminId of config.adminIds) {
+      try {
+        await ctx.bot.sendMessage(adminId, `⚠️ ${order.sku} is now *sold out* and has been hidden from the shop. Restock via the inventory menu.`, {
+          parse_mode: 'Markdown',
+        });
+      } catch {
+        /* ignore */
+      }
+    }
+  }
   try {
     await ctx.bot.sendMessage(
       order.telegram_id,
@@ -468,12 +483,34 @@ export async function adminDispatch(ctx, chatId, telegramId, orderId) {
 
   await ctx.bot.sendMessage(
     chatId,
-    `🚚 *Dispatching ${o.qty} × ${o.sku}*\n📍 ${o.delivery_address}\n📞 ${o.contact_phone || '—'}\n\n` +
-      `Request a courier to this address and it’s on its way.`,
-    { parse_mode: 'Markdown' }
+    `🚚 *Dispatching ${shortRef(o.id)} — ${o.qty} × ${o.sku}*\n📍 ${o.delivery_address}\n📞 ${o.contact_phone || '—'}` +
+      `${o.notes ? `\n📝 ${o.notes}` : ''}\n\nRequest a courier to this address and it’s on its way.`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: [[{ text: '📬 Mark delivered', callback_data: `pm:deliv:${o.id}` }]] },
+    }
   );
   try {
     await ctx.bot.sendMessage(o.telegram_id, '🚚 Your order is out for delivery!');
+  } catch {
+    /* ignore */
+  }
+}
+
+// Admin marks an order delivered → notify the customer (#20).
+export async function adminDelivered(ctx, chatId, telegramId, orderId) {
+  if (!isAdminId(telegramId)) {
+    await ctx.bot.sendMessage(chatId, 'Admins only.');
+    return;
+  }
+  const o = await markOrderDelivered(orderId);
+  if (!o) {
+    await ctx.bot.sendMessage(chatId, 'That order isn’t in a dispatched state.');
+    return;
+  }
+  await ctx.bot.sendMessage(chatId, `📬 ${shortRef(o.id)} marked delivered.`);
+  try {
+    await ctx.bot.sendMessage(o.telegram_id, '📬 Your order was delivered — enjoy! Tap /shop to order again.');
   } catch {
     /* ignore */
   }

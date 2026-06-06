@@ -2,6 +2,7 @@ import TelegramBot from 'node-telegram-bot-api';
 import { config, isAdminId } from './config.js';
 import { upsertUser, getUserByTelegramId } from './supabase.js';
 import { mainMenu } from './lib/keyboards.js';
+import { log, reportError } from './lib/log.js';
 
 import * as shop from './flows/shop.js';
 import * as booking from './flows/booking.js';
@@ -100,7 +101,7 @@ export function createBot() {
       try {
         await shop.receivePhone(ctx, chatId, telegramId, msg.contact.phone_number, msg.from.username);
       } catch (err) {
-        console.error('contact handler error:', err);
+        await reportError(ctx, 'contact handler', err);
       }
       return;
     }
@@ -126,6 +127,12 @@ export function createBot() {
         await admin.doSetFare(ctx, chatId, msg.text);
       } else if (s.flow === 'admin' && s.step === 'awaiting_stock') {
         await admin.doSetStock(ctx, chatId, msg.text);
+      } else if (s.flow === 'admin' && s.step === 'awaiting_broadcast') {
+        await admin.doBroadcast(ctx, chatId, msg.text);
+      } else if (s.flow === 'admin' && s.step === 'awaiting_find_order') {
+        await admin.doFindOrder(ctx, chatId, msg.text);
+      } else if (s.flow === 'admin' && s.step === 'awaiting_refund_txid') {
+        await admin.doRefund(ctx, chatId, msg.text);
       } else if (s.flow === 'expert' && s.step === 'awaiting_builder_address') {
         await expert.doSetAddress(ctx, chatId, telegramId, msg.text.trim());
       } else if (s.flow === 'review' && s.step === 'awaiting_comment') {
@@ -134,7 +141,7 @@ export function createBot() {
         await wallet.receiveCustomAmount(ctx, chatId, msg.text.trim());
       }
     } catch (err) {
-      console.error('message handler error:', err);
+      await reportError(ctx, 'message handler', err);
       await bot.sendMessage(chatId, '⚠️ Something went wrong. Tap /start to try again.');
     }
   });
@@ -182,6 +189,7 @@ export function createBot() {
         } else if (p[0] === 'sent') await payments.customerSent(ctx, chatId, p[1], p[2]);
         else if (p[0] === 'ok') await payments.adminConfirm(ctx, chatId, telegramId, p[1], p[2]);
         else if (p[0] === 'disp') await payments.adminDispatch(ctx, chatId, telegramId, p[1]);
+        else if (p[0] === 'deliv') await payments.adminDelivered(ctx, chatId, telegramId, p[1]);
       }
       // Wallet
       else if (data === 'wal:menu') await wallet.showWallet(ctx, chatId, telegramId);
@@ -222,6 +230,13 @@ export function createBot() {
       else if (data === 'adm:addexpert') await admin.promptAddExpert(ctx, chatId, telegramId);
       else if (data === 'adm:remove') await admin.promptRemove(ctx, chatId, telegramId);
       else if (data === 'adm:bookings') await admin.showBookings(ctx, chatId, telegramId);
+      else if (data === 'adm:orders') await admin.showOpenOrders(ctx, chatId, telegramId);
+      else if (data === 'adm:broadcast') await admin.promptBroadcast(ctx, chatId, telegramId);
+      else if (data === 'adm:find') await admin.promptFindOrder(ctx, chatId, telegramId);
+      else if (data.startsWith('adm:refundo:'))
+        await admin.promptRefund(ctx, chatId, telegramId, 'o', sliceAfter(data, 'adm:refundo:'));
+      else if (data.startsWith('adm:refundb:'))
+        await admin.promptRefund(ctx, chatId, telegramId, 'b', sliceAfter(data, 'adm:refundb:'));
       else if (data === 'adm:inv') await admin.showInventory(ctx, chatId, telegramId);
       else if (data.startsWith('adm:stock:'))
         await admin.promptSetStock(ctx, chatId, telegramId, sliceAfter(data, 'adm:stock:'));
@@ -233,13 +248,13 @@ export function createBot() {
       else if (data.startsWith('adm:fare:'))
         await admin.promptFare(ctx, chatId, telegramId, sliceAfter(data, 'adm:fare:'));
     } catch (err) {
-      console.error('callback handler error:', err);
+      await reportError(ctx, 'callback handler', err);
     } finally {
       bot.answerCallbackQuery(q.id).catch(() => {});
     }
   });
 
-  bot.on('polling_error', (err) => console.error('polling_error:', err.message));
+  bot.on('polling_error', (err) => log.error(`polling_error: ${err.message}`));
 
   return { bot, ctx };
 }

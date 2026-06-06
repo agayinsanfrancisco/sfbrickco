@@ -45,9 +45,15 @@ export async function pickHour(ctx, chatId, startIso) {
   });
   await ctx.bot.sendMessage(
     chatId,
-    'Great. What is the *full address* where you need setup help?\n' +
-      '(Street, city, ZIP — used to estimate the Uber travel surcharge.)',
-    { parse_mode: 'Markdown' }
+    'Great. What is the *full address* where you need build help?\n' +
+      '(Street, city, ZIP — used to estimate the travel surcharge.)',
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        force_reply: true,
+        input_field_placeholder: '123 Main St, San Francisco, CA 94110',
+      },
+    }
   );
 }
 

@@ -61,6 +61,10 @@ export const config = {
   server: {
     port: int('PORT', 3000),
   },
+  cleanup: {
+    // Auto-cancel unpaid orders/bookings older than this (abandoned-order sweep).
+    abandonAfterMs: int('ABANDON_AFTER_HOURS', 24) * 60 * 60 * 1000,
+  },
   adminIds: (process.env.ADMIN_TELEGRAM_IDS || '')
     .split(',')
     .map((s) => s.trim())

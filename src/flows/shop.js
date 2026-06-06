@@ -92,12 +92,15 @@ async function beginDelivery(ctx, chatId, sku, qty) {
   // chatId === telegramId, so it doubles as the user key for the lookup.
   const last = await lastDeliveryAddress(chatId);
   ctx.sessions.set(chatId, { flow: 'shop', step: 'awaiting_delivery_address', sku, qty, lastAddr: last });
+  // With a saved address, offer the one-tap button; otherwise force_reply with a
+  // format placeholder so the input box guides street / city / ZIP.
   const reply_markup = last
     ? { inline_keyboard: [[{ text: `📍 Use last: ${last.slice(0, 40)}`, callback_data: 'shop:lastaddr' }]] }
-    : undefined;
+    : { force_reply: true, input_field_placeholder: '123 Main St, San Francisco, CA 94110' };
   await ctx.bot.sendMessage(
     chatId,
-    `📍 What’s the *delivery address*? We courier your ${p.name} by Uber and add the delivery fee at checkout.`,
+    `📍 What’s the *delivery address*? (Street, city, ZIP)\n` +
+      `We courier your ${p.name} by Uber and add the delivery fee at checkout.`,
     { parse_mode: 'Markdown', reply_markup }
   );
 }

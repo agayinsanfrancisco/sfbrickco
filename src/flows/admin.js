@@ -13,10 +13,14 @@ import {
   addBuilderInvite,
   listInventory,
   setStock,
+  listPaidUndispatchedOrders,
+  listRecentOrders,
+  markOrderRefunded,
+  markBookingRefunded,
 } from '../supabase.js';
 import { manualSurchargeCents, estimateBetween } from '../uber.js';
 import { adminMenu } from '../lib/keyboards.js';
-import { usd, fmtHourRange } from '../lib/format.js';
+import { usd, fmtHourRange, shortRef } from '../lib/format.js';
 
 function ensureAdmin(ctx, chatId, telegramId) {
   if (!isAdminId(telegramId)) {
@@ -170,6 +174,114 @@ export async function assignExpert(ctx, chatId, telegramId, bookingId, expertId)
         reply_markup: { inline_keyboard: [[{ text: `Pay ${usd(total)}`, callback_data: `book:pay:${bookingId}` }]] },
       }
     );
+  } catch {
+    /* ignore */
+  }
+}
+
+// ── Open orders (paid, awaiting dispatch) (#12) ──────────────────────
+export async function showOpenOrders(ctx, chatId, telegramId) {
+  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const orders = await listPaidUndispatchedOrders();
+  if (!orders.length) {
+    await ctx.bot.sendMessage(chatId, 'No paid orders awaiting dispatch.');
+    return;
+  }
+  for (const o of orders) {
+    const total = (o.amount_cents || 0) + (o.delivery_fee_cents || 0);
+    await ctx.bot.sendMessage(
+      chatId,
+      `📦 *${shortRef(o.id)}* — ${o.qty}× ${o.sku}\n📍 ${o.delivery_address}\n📞 ${o.contact_phone || '—'}` +
+        `${o.notes ? `\n📝 ${o.notes}` : ''}\n${usd(total)}`,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: { inline_keyboard: [[{ text: '🚚 Accept & dispatch', callback_data: `pm:disp:${o.id}` }]] },
+      }
+    );
+  }
+}
+
+// ── Broadcast (#28) ──────────────────────────────────────────────────
+export async function promptBroadcast(ctx, chatId, telegramId) {
+  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  ctx.sessions.set(chatId, { flow: 'admin', step: 'awaiting_broadcast' });
+  await ctx.bot.sendMessage(chatId, 'Send the message to broadcast to all customers (or /start to cancel):');
+}
+
+export async function doBroadcast(ctx, chatId, text) {
+  ctx.sessions.delete(chatId);
+  const users = await listUsers();
+  let sent = 0;
+  let failed = 0;
+  for (const u of users) {
+    try {
+      await ctx.bot.sendMessage(u.telegram_id, `📣 ${text}`);
+      sent++;
+    } catch {
+      failed++;
+    }
+  }
+  await ctx.bot.sendMessage(chatId, `✅ Broadcast sent to ${sent} user(s)${failed ? `, ${failed} unreachable` : ''}.`);
+}
+
+// ── Order lookup by ref (#38) ────────────────────────────────────────
+export async function promptFindOrder(ctx, chatId, telegramId) {
+  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  ctx.sessions.set(chatId, { flow: 'admin', step: 'awaiting_find_order' });
+  await ctx.bot.sendMessage(chatId, 'Send an order ref (e.g. SFB-3F9A2C):');
+}
+
+export async function doFindOrder(ctx, chatId, text) {
+  ctx.sessions.delete(chatId);
+  const key = String(text).toUpperCase().replace(/[^0-9A-F]/g, '').slice(0, 6);
+  if (key.length < 4) {
+    await ctx.bot.sendMessage(chatId, 'That doesn’t look like a ref. Try e.g. SFB-3F9A2C.');
+    return;
+  }
+  const orders = await listRecentOrders(500);
+  const o = orders.find((x) => shortRef(x.id).replace('SFB-', '') === key);
+  if (!o) {
+    await ctx.bot.sendMessage(chatId, 'No matching order found.');
+    return;
+  }
+  const total = (o.amount_cents || 0) + (o.delivery_fee_cents || 0);
+  const canRefund = ['paid', 'dispatched', 'delivered'].includes(o.status);
+  await ctx.bot.sendMessage(
+    chatId,
+    `🧾 *${shortRef(o.id)}*\n${o.qty}× ${o.sku} · ${usd(total)}\nStatus: *${o.status}*\n` +
+      `📍 ${o.delivery_address || '—'}\n📞 ${o.contact_phone || '—'}` +
+      `${o.notes ? `\n📝 ${o.notes}` : ''}${o.pay_txid ? `\n🔗 \`${o.pay_txid}\`` : ''}`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: canRefund
+        ? { inline_keyboard: [[{ text: '↩️ Mark refunded', callback_data: `adm:refundo:${o.id}` }]] }
+        : undefined,
+    }
+  );
+}
+
+// ── Refund recording (#37) ───────────────────────────────────────────
+export async function promptRefund(ctx, chatId, telegramId, kind, ref) {
+  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  ctx.sessions.set(chatId, { flow: 'admin', step: 'awaiting_refund_txid', data: { kind, ref } });
+  await ctx.bot.sendMessage(chatId, 'Send the refund transaction id (or type "none"):');
+}
+
+export async function doRefund(ctx, chatId, text) {
+  const session = ctx.sessions.get(chatId);
+  const { kind, ref } = session?.data || {};
+  ctx.sessions.delete(chatId);
+  if (!ref) return;
+  const txid = String(text).trim().toLowerCase() === 'none' ? null : String(text).trim();
+  const row = kind === 'o' ? await markOrderRefunded(ref, txid) : await markBookingRefunded(ref, txid);
+  if (!row) {
+    await ctx.bot.sendMessage(chatId, 'Couldn’t mark that refunded.');
+    return;
+  }
+  await ctx.bot.sendMessage(chatId, `↩️ Marked refunded${txid ? ` (tx ${txid})` : ''}.`);
+  const customerId = kind === 'o' ? row.telegram_id : row.customer_telegram_id;
+  try {
+    await ctx.bot.sendMessage(customerId, `↩️ Your ${kind === 'o' ? 'order' : 'booking'} ${shortRef(ref)} has been refunded.`);
   } catch {
     /* ignore */
   }

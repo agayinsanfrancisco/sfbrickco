@@ -1,12 +1,18 @@
 import { config } from './src/config.js';
 import { createBot } from './src/bot.js';
 import { createServer } from './src/server.js';
-import { listBookingsNeedingReview } from './src/supabase.js';
+import {
+  listBookingsNeedingReview,
+  cancelStalePendingOrders,
+  cancelStaleUnpaidBookings,
+} from './src/supabase.js';
 import { promptReview } from './src/flows/review.js';
 import { watchOnce } from './src/watcher.js';
+import { log } from './src/lib/log.js';
 
 const REVIEW_POLL_MS = 60 * 1000;
 const WATCH_POLL_MS = 60 * 1000;
+const CLEANUP_POLL_MS = 60 * 60 * 1000; // hourly
 
 function startReviewScheduler(ctx) {
   const tick = async () => {
@@ -28,10 +34,30 @@ function startPaymentWatcher(ctx) {
     try {
       await watchOnce(ctx);
     } catch (err) {
-      console.error('payment watcher error:', err);
+      log.error(`payment watcher error: ${err.message}`);
     }
   };
   setInterval(tick, WATCH_POLL_MS);
+  tick();
+}
+
+// Abandoned-order sweep (#18): cancel unpaid orders/bookings past the window.
+function startCleanupSweep() {
+  const tick = async () => {
+    try {
+      const before = new Date(Date.now() - config.cleanup.abandonAfterMs).toISOString();
+      const [orders, bookings] = await Promise.all([
+        cancelStalePendingOrders(before),
+        cancelStaleUnpaidBookings(before),
+      ]);
+      if (orders.length || bookings.length) {
+        log.info('cleanup swept', { orders: orders.length, bookings: bookings.length });
+      }
+    } catch (err) {
+      log.error(`cleanup sweep error: ${err.message}`);
+    }
+  };
+  setInterval(tick, CLEANUP_POLL_MS);
   tick();
 }
 
@@ -46,6 +72,7 @@ function main() {
 
   startReviewScheduler(ctx);
   startPaymentWatcher(ctx);
+  startCleanupSweep();
 
   const shutdown = (sig) => {
     console.log(`\n${sig} received, shutting down…`);

@@ -280,6 +280,50 @@ export async function listPaidUndispatchedOrders() {
   return data || [];
 }
 
+// dispatched → delivered (#20). Conditional so it's idempotent.
+export async function markOrderDelivered(id) {
+  const { data } = await supabase
+    .from('orders')
+    .update({ status: 'delivered' })
+    .eq('id', id)
+    .eq('status', 'dispatched')
+    .select('*')
+    .maybeSingle();
+  return data;
+}
+
+// Abandoned-order sweep (#18): cancel stale unpaid orders/bookings.
+export async function cancelStalePendingOrders(beforeIso) {
+  const { data } = await supabase
+    .from('orders')
+    .update({ status: 'cancelled' })
+    .eq('status', 'pending')
+    .lt('created_at', beforeIso)
+    .select('id');
+  return data || [];
+}
+
+export async function cancelStaleUnpaidBookings(beforeIso) {
+  const { data } = await supabase
+    .from('bookings')
+    .update({ status: 'cancelled' })
+    .eq('payment_status', 'unpaid')
+    .in('status', ['awaiting_acceptance', 'awaiting_payment'])
+    .lt('created_at', beforeIso)
+    .select('id');
+  return data || [];
+}
+
+// Recent orders for admin ref-lookup (#38) — matched client-side by shortRef.
+export async function listRecentOrders(limit = 200) {
+  const { data } = await supabase
+    .from('orders')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  return data || [];
+}
+
 // ── Products (catalog) ───────────────────────────────────────────────
 export async function listProducts() {
   const { data } = await supabase
@@ -546,6 +590,16 @@ export async function getInventory(sku) {
 export async function listInventory() {
   const { data } = await supabase.from('inventory').select('*').order('sku');
   return data || [];
+}
+
+export async function setProductActive(sku, active) {
+  const { data } = await supabase
+    .from('inventory')
+    .update({ active, updated_at: new Date().toISOString() })
+    .eq('sku', sku)
+    .select('*')
+    .maybeSingle();
+  return data;
 }
 
 export async function setStock(sku, qty) {
