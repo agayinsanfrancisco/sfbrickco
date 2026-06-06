@@ -651,6 +651,42 @@ export async function listInventory() {
   return data || [];
 }
 
+// ── Persisted sessions (#34) ─────────────────────────────────────────
+export async function saveSession(chatId, state) {
+  await supabase
+    .from('sessions')
+    .upsert({ chat_id: chatId, state, updated_at: new Date().toISOString() }, { onConflict: 'chat_id' });
+}
+
+export async function deleteSession(chatId) {
+  await supabase.from('sessions').delete().eq('chat_id', chatId);
+}
+
+export async function loadAllSessions() {
+  const { data } = await supabase.from('sessions').select('chat_id, state');
+  return data || [];
+}
+
+// ── GDPR: delete a user's data (#50) ─────────────────────────────────
+export async function deleteUserData(telegramId) {
+  await supabase.from('events').delete().eq('telegram_id', telegramId);
+  await supabase.from('ledger').delete().eq('telegram_id', telegramId);
+  await supabase.from('deposits').delete().eq('telegram_id', telegramId);
+  await supabase.from('orders').delete().eq('telegram_id', telegramId);
+  await supabase.from('reviews').delete().eq('customer_telegram_id', telegramId);
+  await supabase.from('bookings').delete().eq('customer_telegram_id', telegramId);
+  await supabase.from('sessions').delete().eq('chat_id', telegramId);
+  // The user row may be referenced by other bookings as an expert (FK), so try a
+  // hard delete and fall back to anonymizing if that fails.
+  const { error } = await supabase.from('users').delete().eq('telegram_id', telegramId);
+  if (error) {
+    await supabase
+      .from('users')
+      .update({ username: null, full_name: null, address: null, active: false })
+      .eq('telegram_id', telegramId);
+  }
+}
+
 // ── Analytics events (#49) ───────────────────────────────────────────
 export async function logEvent(telegramId, kind, meta = null) {
   try {

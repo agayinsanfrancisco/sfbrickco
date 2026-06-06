@@ -1,4 +1,4 @@
-import { config } from './src/config.js';
+import { config, validateConfig } from './src/config.js';
 import { createBot } from './src/bot.js';
 import { createServer } from './src/server.js';
 import {
@@ -103,6 +103,7 @@ function startReminderScheduler(ctx) {
 }
 
 function main() {
+  for (const w of validateConfig()) log.warn(`config: ${w}`);
   const { bot, ctx } = createBot();
   console.log('🤖 Telegram bot started (long polling).');
 

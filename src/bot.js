@@ -1,8 +1,9 @@
 import TelegramBot from 'node-telegram-bot-api';
 import { config, isAdminId } from './config.js';
-import { upsertUser, getUserByTelegramId } from './supabase.js';
+import { upsertUser, getUserByTelegramId, deleteUserData } from './supabase.js';
 import { mainMenu } from './lib/keyboards.js';
 import { log, reportError } from './lib/log.js';
+import { SessionStore } from './lib/sessions.js';
 
 import * as shop from './flows/shop.js';
 import * as booking from './flows/booking.js';
@@ -13,9 +14,24 @@ import * as payments from './flows/payments.js';
 import * as account from './flows/account.js';
 import * as wallet from './flows/wallet.js';
 
+// Simple per-user rate limiter (#23): max N actions per sliding window.
+function makeRateLimiter({ max, windowMs }) {
+  const hits = new Map(); // userId -> [timestamps]
+  return (userId) => {
+    const now = Date.now();
+    const recent = (hits.get(userId) || []).filter((t) => now - t < windowMs);
+    recent.push(now);
+    hits.set(userId, recent);
+    return recent.length <= max;
+  };
+}
+
 export function createBot() {
   const bot = new TelegramBot(config.telegram.token, { polling: true });
-  const sessions = new Map(); // chatId -> { flow, step, data }
+  const sessions = new SessionStore(config.session.ttlMs); // persisted + idle-TTL
+  sessions.hydrate(); // floating: rehydrate in-progress flows after a restart
+  setInterval(() => sessions.sweep(), 5 * 60 * 1000);
+  const allow = makeRateLimiter(config.rateLimit);
   const ctx = { bot, sessions };
 
   // Register the in-app slash-command menu (the "/" button). Best-effort.
@@ -68,6 +84,20 @@ export function createBot() {
   bot.onText(/^\/help/, (msg) => account.showHelp(ctx, msg.chat.id, msg.from.id));
   bot.onText(/^\/orders/, (msg) => account.showMyOrders(ctx, msg.chat.id, msg.from.id));
   bot.onText(/^\/(wallet|balance)/, (msg) => wallet.showWallet(ctx, msg.chat.id, msg.from.id));
+  bot.onText(/^\/forgetme/, (msg) =>
+    bot.sendMessage(
+      msg.chat.id,
+      '⚠️ This permanently deletes your account, orders, bookings, and wallet balance. It cannot be undone.',
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: '🗑️ Yes, delete everything', callback_data: 'acct:forget' }],
+            [{ text: 'Cancel', callback_data: 'acct:forgetno' }],
+          ],
+        },
+      }
+    )
+  );
   // Builder portal — /builder (and /expert alias). upsertUser applies any
   // pending @handle invite, promoting the user to builder on first visit.
   const openBuilderPortal = async (msg) => {
@@ -92,8 +122,10 @@ export function createBot() {
 
   // ── Free-text (multi-step flow input) ────────────────────────────────
   bot.on('message', async (msg) => {
+    pollHealthy(); // any inbound message proves polling works (#52)
     const chatId = msg.chat.id;
     const telegramId = msg.from.id;
+    if (!allow(telegramId)) return; // rate limit (#23)
     const s = sessions.get(chatId);
 
     // Shared-contact replies (phone number) have no text.
@@ -160,9 +192,14 @@ export function createBot() {
 
   // ── Inline buttons ───────────────────────────────────────────────────
   bot.on('callback_query', async (q) => {
+    pollHealthy();
     const chatId = q.message?.chat?.id;
     const telegramId = q.from.id;
     const data = q.data || '';
+    if (!allow(telegramId)) {
+      bot.answerCallbackQuery(q.id, { text: 'Slow down a moment…' }).catch(() => {});
+      return;
+    }
     try {
       // Shop
       if (data === 'shop:start') await shop.startShop(ctx, chatId);
@@ -228,6 +265,13 @@ export function createBot() {
         await account.cancelMyOrder(ctx, chatId, telegramId, sliceAfter(data, 'acct:cano:'));
       else if (data.startsWith('acct:canb:'))
         await account.cancelMyBooking(ctx, chatId, telegramId, sliceAfter(data, 'acct:canb:'));
+      else if (data === 'acct:forget') {
+        await deleteUserData(telegramId);
+        sessions.delete(chatId);
+        await bot.sendMessage(chatId, '🗑️ Your data has been deleted. Take care!');
+      } else if (data === 'acct:forgetno') {
+        await bot.sendMessage(chatId, 'Cancelled — nothing was deleted.');
+      }
       // Expert
       else if (data === 'exp:list') await expert.listJobs(ctx, chatId, telegramId);
       else if (data === 'exp:addr') await expert.promptSetAddress(ctx, chatId, telegramId);
@@ -281,7 +325,23 @@ export function createBot() {
     }
   });
 
-  bot.on('polling_error', (err) => log.error(`polling_error: ${err.message}`));
+  // Polling watchdog (#52): restart polling after repeated consecutive errors;
+  // any successful inbound update resets the counter via pollHealthy().
+  let pollErrors = 0;
+  function pollHealthy() {
+    pollErrors = 0;
+  }
+  bot.on('polling_error', (err) => {
+    log.error(`polling_error: ${err.message}`);
+    if (++pollErrors >= 5) {
+      pollErrors = 0;
+      log.warn('restarting polling after repeated errors');
+      bot
+        .stopPolling()
+        .then(() => bot.startPolling())
+        .catch((e) => log.error(`poll restart failed: ${e.message}`));
+    }
+  });
 
   return { bot, ctx };
 }

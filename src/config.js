@@ -68,6 +68,13 @@ export const config = {
     // Auto-cancel unpaid orders/bookings older than this (abandoned-order sweep).
     abandonAfterMs: int('ABANDON_AFTER_HOURS', 24) * 60 * 60 * 1000,
   },
+  session: {
+    ttlMs: int('SESSION_TTL_MINUTES', 30) * 60 * 1000, // idle session expiry
+  },
+  rateLimit: {
+    max: int('RATE_LIMIT_MAX', 20), // max messages/callbacks per window per user
+    windowMs: int('RATE_LIMIT_WINDOW_MS', 10000),
+  },
   adminIds: (process.env.ADMIN_TELEGRAM_IDS || '')
     .split(',')
     .map((s) => s.trim())
@@ -77,4 +84,16 @@ export const config = {
 
 export function isAdminId(telegramId) {
   return config.adminIds.includes(Number(telegramId));
+}
+
+// Non-fatal startup checks (#10). Returns a list of warning strings.
+export function validateConfig() {
+  const warnings = [];
+  if (!config.crypto.enabled) {
+    warnings.push('No crypto payment method configured (set BTC_XPUB/LTC_XPUB or a static address).');
+  }
+  if (!config.adminIds.length) {
+    warnings.push('No ADMIN_TELEGRAM_IDS set — admin panel + payment confirmations are unreachable.');
+  }
+  return warnings;
 }

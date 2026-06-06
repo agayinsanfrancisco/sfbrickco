@@ -1,6 +1,7 @@
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { supabase } from './supabase.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -10,7 +11,17 @@ const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 // is no payment webhook to host in this first run.
 export function createServer() {
   const app = express();
-  app.get('/health', (_req, res) => res.json({ ok: true }));
+  // Deep health check (#35): verify DB connectivity so Coolify restarts on real
+  // failure, not just process liveness. Returns 503 when the DB is unreachable.
+  app.get('/health', async (_req, res) => {
+    try {
+      const { error } = await supabase.from('settings').select('key').limit(1);
+      if (error) throw error;
+      res.json({ ok: true, db: 'up' });
+    } catch (err) {
+      res.status(503).json({ ok: false, db: 'down', error: err.message });
+    }
+  });
   app.use(express.static(PUBLIC_DIR));
   return app;
 }

@@ -149,6 +149,14 @@ create table if not exists settings (
 );
 alter table settings enable row level security;
 
+-- ── Persisted bot sessions (survive redeploys) ───────────────────────
+create table if not exists sessions (
+  chat_id    bigint primary key,
+  state      jsonb not null,
+  updated_at timestamptz not null default now()
+);
+alter table sessions enable row level security;
+
 -- ── Builder invites (pre-approved @handles) ──────────────────────────
 create table if not exists builder_invites (
   username    text primary key,
