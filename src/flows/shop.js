@@ -3,7 +3,7 @@ import { listProducts, getProduct, createOrder } from '../supabase.js';
 import { priceForProduct, packOptions } from '../lib/pricing.js';
 import { estimateSurcharge } from '../uber.js';
 import { qtyKeyboard } from '../lib/keyboards.js';
-import { usd } from '../lib/format.js';
+import { usd, shortRef } from '../lib/format.js';
 import { presentOrderMethods } from './payments.js';
 
 export async function startShop(ctx, chatId) {
@@ -131,6 +131,9 @@ export async function receivePhone(ctx, chatId, telegramId, phone, handle) {
     contactPhone: phone || null,
     contactHandle: handle || null,
   });
-  await ctx.bot.sendMessage(chatId, '✅ Got it — thanks!', { reply_markup: { remove_keyboard: true } });
+  await ctx.bot.sendMessage(chatId, `✅ Order *${shortRef(order.id)}* created — thanks!`, {
+    parse_mode: 'Markdown',
+    reply_markup: { remove_keyboard: true },
+  });
   await presentOrderMethods(ctx, chatId, order, p);
 }

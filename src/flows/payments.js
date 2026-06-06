@@ -1,6 +1,6 @@
 import { config, isAdminId } from '../config.js';
 import * as crypto from '../crypto.js';
-import { usd, fmtHourRange } from '../lib/format.js';
+import { usd, fmtHourRange, shortRef } from '../lib/format.js';
 import {
   getOrder,
   markOrderPaid,
@@ -13,6 +13,9 @@ import {
   setBookingCrypto,
   nextDerivationIndex,
   getUserById,
+  getBalance,
+  debitBalance,
+  creditBalance,
 } from '../supabase.js';
 
 // Crypto-only payments (BTC/LTC). With an xpub configured, each order gets a
@@ -31,7 +34,12 @@ function methodButtons(kind, ref) {
 // Order row already created (with delivery + contact). Show totals + methods.
 export async function presentOrderMethods(ctx, chatId, order, product) {
   const total = order.amount_cents + order.delivery_fee_cents;
-  const rows = methodButtons('o', order.id);
+  const rows = [];
+  const balance = await getBalance(order.telegram_id);
+  if (balance >= total) {
+    rows.push([{ text: `💰 Pay from balance (${usd(balance)})`, callback_data: `pm:bal:o:${order.id}` }]);
+  }
+  rows.push(...methodButtons('o', order.id));
   if (!rows.length) {
     await ctx.bot.sendMessage(chatId, '🛒 Payments aren’t live yet — please check back soon!');
     return;
@@ -41,7 +49,7 @@ export async function presentOrderMethods(ctx, chatId, order, product) {
     `🧾 *${order.qty} × ${product?.name || order.sku}*\n` +
       `• Items: ${usd(order.amount_cents)}\n` +
       `• Courier delivery: ${usd(order.delivery_fee_cents)}\n` +
-      `• *Total: ${usd(total)}*\nPay with crypto:`,
+      `• *Total: ${usd(total)}*\nChoose how to pay:`,
     { parse_mode: 'Markdown', reply_markup: { inline_keyboard: rows } }
   );
 }
@@ -56,7 +64,12 @@ export async function presentBookingMethods(ctx, chatId, bookingId) {
     await ctx.bot.sendMessage(chatId, 'We’re still confirming the travel surcharge. Hang tight!');
     return;
   }
-  const rows = methodButtons('b', bookingId);
+  const rows = [];
+  const balance = await getBalance(booking.customer_telegram_id);
+  if (balance >= booking.total_cents) {
+    rows.push([{ text: `💰 Pay from balance (${usd(balance)})`, callback_data: `pm:bal:b:${bookingId}` }]);
+  }
+  rows.push(...methodButtons('b', bookingId));
   if (!rows.length) {
     await ctx.bot.sendMessage(chatId, '💳 Payments aren’t live yet — please check back soon!');
     return;
@@ -66,7 +79,7 @@ export async function presentBookingMethods(ctx, chatId, bookingId) {
     `🧾 Booking total *${usd(booking.total_cents)}* for ${fmtHourRange(
       booking.slot_start,
       booking.slot_end
-    )}\nPay with crypto:`,
+    )}\nChoose how to pay:`,
     { parse_mode: 'Markdown', reply_markup: { inline_keyboard: rows } }
   );
 }
@@ -298,6 +311,62 @@ export async function customerSent(ctx, chatId, kind, ref) {
   }
 }
 
+// ── Pay from prepaid wallet balance ──────────────────────────────────
+export async function payOrderFromBalance(ctx, chatId, telegramId, orderId) {
+  const order = await getOrder(orderId);
+  if (!order || order.status !== 'pending') {
+    await ctx.bot.sendMessage(chatId, 'That order is no longer awaiting payment.');
+    return;
+  }
+  const product = await getProduct(order.sku);
+  if ((product?.stock_qty ?? 0) < order.qty) {
+    await ctx.bot.sendMessage(chatId, '😔 That item is no longer in stock. Please start a new order.');
+    return;
+  }
+  const total = order.amount_cents + order.delivery_fee_cents;
+  const newBalance = await debitBalance(order.telegram_id, total, { refType: 'order', refId: order.id });
+  if (newBalance === null) {
+    await ctx.bot.sendMessage(chatId, 'Your balance no longer covers this. Tap /wallet to top up.');
+    return;
+  }
+  const ok = await confirmOrder(ctx, order, { auto: false });
+  if (!ok) {
+    // Already paid (e.g. watcher race) — refund the debit so nothing is lost.
+    await creditBalance(order.telegram_id, total, { kind: 'refund', refType: 'order', refId: order.id });
+    await ctx.bot.sendMessage(chatId, 'That order was already paid — your balance wasn’t charged.');
+    return;
+  }
+  await ctx.bot.sendMessage(chatId, `💰 Paid ${usd(total)} from your balance. Remaining: ${usd(newBalance)}.`);
+}
+
+export async function payBookingFromBalance(ctx, chatId, telegramId, bookingId) {
+  const booking = await getBooking(bookingId);
+  if (!booking || booking.surcharge_source === 'pending' || booking.payment_status !== 'unpaid') {
+    await ctx.bot.sendMessage(chatId, 'That booking isn’t ready for payment yet.');
+    return;
+  }
+  const total = booking.total_cents;
+  const newBalance = await debitBalance(booking.customer_telegram_id, total, {
+    refType: 'booking',
+    refId: booking.id,
+  });
+  if (newBalance === null) {
+    await ctx.bot.sendMessage(chatId, 'Your balance no longer covers this. Tap /wallet to top up.');
+    return;
+  }
+  const ok = await confirmBooking(ctx, booking, { auto: false });
+  if (!ok) {
+    await creditBalance(booking.customer_telegram_id, total, {
+      kind: 'refund',
+      refType: 'booking',
+      refId: booking.id,
+    });
+    await ctx.bot.sendMessage(chatId, 'That booking was already paid — your balance wasn’t charged.');
+    return;
+  }
+  await ctx.bot.sendMessage(chatId, `💰 Paid ${usd(total)} from your balance. Remaining: ${usd(newBalance)}.`);
+}
+
 // ── Fulfillment (shared by watcher + manual admin button) ────────────
 export async function confirmOrder(ctx, order, { auto = false } = {}) {
   const paid = await markOrderPaid(order.id);
@@ -312,7 +381,7 @@ export async function confirmOrder(ctx, order, { auto = false } = {}) {
     /* ignore */
   }
   const detail =
-    `📦 *Paid order — ready to dispatch*\n` +
+    `📦 *Paid order ${shortRef(order.id)} — ready to dispatch*\n` +
     `${order.qty} × ${order.sku}\n` +
     `📍 ${order.delivery_address}\n` +
     `📞 ${order.contact_phone || '—'}${order.contact_handle ? ` (@${order.contact_handle})` : ''}\n` +

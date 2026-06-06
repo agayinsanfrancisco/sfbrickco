@@ -3,8 +3,12 @@
 
 export function mainMenu({ isExpert, isAdmin } = {}) {
   const rows = [
-    [{ text: '🧱 Buy red LEGOs', callback_data: 'shop:start' }],
-    [{ text: '🛠️ Book a LEGO expert', callback_data: 'book:start' }],
+    [{ text: '🧱 Shop bricks & parts', callback_data: 'shop:start' }],
+    [{ text: '🛠️ Book build help', callback_data: 'book:start' }],
+    [
+      { text: '💰 Wallet', callback_data: 'wal:menu' },
+      { text: '🧾 My orders', callback_data: 'acct:orders' },
+    ],
   ];
   if (isExpert) {
     rows.push([{ text: '📋 My jobs (builder)', callback_data: 'exp:list' }]);

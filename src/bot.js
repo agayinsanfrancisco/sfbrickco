@@ -9,11 +9,24 @@ import * as expert from './flows/expert.js';
 import * as admin from './flows/admin.js';
 import * as review from './flows/review.js';
 import * as payments from './flows/payments.js';
+import * as account from './flows/account.js';
+import * as wallet from './flows/wallet.js';
 
 export function createBot() {
   const bot = new TelegramBot(config.telegram.token, { polling: true });
   const sessions = new Map(); // chatId -> { flow, step, data }
   const ctx = { bot, sessions };
+
+  // Register the in-app slash-command menu (the "/" button). Best-effort.
+  bot
+    .setMyCommands([
+      { command: 'shop', description: 'Browse & order 3D-printed parts' },
+      { command: 'book', description: 'Book on-site build help in SF' },
+      { command: 'wallet', description: 'Add funds & check your balance' },
+      { command: 'orders', description: 'Your recent orders & bookings' },
+      { command: 'help', description: 'How this bot works' },
+    ])
+    .catch((err) => console.error('setMyCommands failed:', err.message));
 
   const sliceAfter = (data, prefix) => data.slice(prefix.length);
 
@@ -21,7 +34,7 @@ export function createBot() {
     const user = await getUserByTelegramId(telegramId);
     await bot.sendMessage(
       chatId,
-      '🧱 *Heaux SF — LEGO* 🧱\n\nBuy red LEGOs or book a LEGO expert to set them up.',
+      '🧱 *SF Brick Company* 🧱\n\nCustom 3D-printed accessories for building-block brands — plus on-site build help in SF. Pay in crypto or from your wallet.',
       {
         parse_mode: 'Markdown',
         ...mainMenu({
@@ -33,7 +46,7 @@ export function createBot() {
   }
 
   // ── Commands ───────────────────────────────────────────────────────
-  bot.onText(/^\/start/, async (msg) => {
+  bot.onText(/^\/start(?:\s+(\S+))?/, async (msg, match) => {
     const from = msg.from;
     await upsertUser({
       telegramId: from.id,
@@ -41,11 +54,19 @@ export function createBot() {
       fullName: [from.first_name, from.last_name].filter(Boolean).join(' '),
     });
     sessions.delete(msg.chat.id);
+    // Deep-link payload: t.me/<bot>?start=shop|book|wallet jumps straight in.
+    const payload = (match?.[1] || '').toLowerCase();
+    if (payload === 'shop') return shop.startShop(ctx, msg.chat.id);
+    if (payload === 'book') return booking.startBooking(ctx, msg.chat.id);
+    if (payload === 'wallet') return wallet.showWallet(ctx, msg.chat.id, from.id);
     await sendMainMenu(msg.chat.id, from.id);
   });
 
   bot.onText(/^\/shop/, (msg) => shop.startShop(ctx, msg.chat.id));
   bot.onText(/^\/book/, (msg) => booking.startBooking(ctx, msg.chat.id));
+  bot.onText(/^\/help/, (msg) => account.showHelp(ctx, msg.chat.id, msg.from.id));
+  bot.onText(/^\/orders/, (msg) => account.showMyOrders(ctx, msg.chat.id, msg.from.id));
+  bot.onText(/^\/(wallet|balance)/, (msg) => wallet.showWallet(ctx, msg.chat.id, msg.from.id));
   // Builder portal — /builder (and /expert alias). upsertUser applies any
   // pending @handle invite, promoting the user to builder on first visit.
   const openBuilderPortal = async (msg) => {
@@ -107,6 +128,8 @@ export function createBot() {
         await expert.doSetAddress(ctx, chatId, telegramId, msg.text.trim());
       } else if (s.flow === 'review' && s.step === 'awaiting_comment') {
         await review.addComment(ctx, chatId, telegramId, msg.text.trim());
+      } else if (s.flow === 'wallet' && s.step === 'awaiting_amount') {
+        await wallet.receiveCustomAmount(ctx, chatId, msg.text.trim());
       }
     } catch (err) {
       console.error('message handler error:', err);
@@ -143,7 +166,11 @@ export function createBot() {
         const p = sliceAfter(data, 'pm:').split(':'); // crypto-only (btc/ltc)
         if (p[0] === 'o') await payments.payOrderCrypto(ctx, chatId, telegramId, p[1], p[2]); // p[2]=orderId
         else if (p[0] === 'b') await payments.payBookingCrypto(ctx, chatId, telegramId, p[1], p[2]);
-        else if (p[0] === 're') {
+        else if (p[0] === 'bal') {
+          // pm:bal:<kind>:<ref> — pay from prepaid wallet balance
+          if (p[1] === 'o') await payments.payOrderFromBalance(ctx, chatId, telegramId, p[2]);
+          else if (p[1] === 'b') await payments.payBookingFromBalance(ctx, chatId, telegramId, p[2]);
+        } else if (p[0] === 're') {
           // pm:re:<kind>:<coin>:<ref> — re-quote a fresh address/rate
           if (p[1] === 'o') await payments.payOrderCrypto(ctx, chatId, telegramId, p[2], p[3], { refresh: true });
           else if (p[1] === 'b') await payments.payBookingCrypto(ctx, chatId, telegramId, p[2], p[3], { refresh: true });
@@ -151,6 +178,23 @@ export function createBot() {
         else if (p[0] === 'ok') await payments.adminConfirm(ctx, chatId, telegramId, p[1], p[2]);
         else if (p[0] === 'disp') await payments.adminDispatch(ctx, chatId, telegramId, p[1]);
       }
+      // Wallet
+      else if (data === 'wal:menu') await wallet.showWallet(ctx, chatId, telegramId);
+      else if (data === 'wal:add') await wallet.startDeposit(ctx, chatId);
+      else if (data === 'wal:stmt') await wallet.showStatement(ctx, chatId, telegramId);
+      else if (data === 'wal:amt:custom') await wallet.promptCustomAmount(ctx, chatId);
+      else if (data.startsWith('wal:amt:'))
+        await wallet.chooseAmount(ctx, chatId, Number.parseInt(sliceAfter(data, 'wal:amt:'), 10));
+      else if (data.startsWith('wal:coin:')) {
+        const [coin, cents] = sliceAfter(data, 'wal:coin:').split(':');
+        await wallet.payDeposit(ctx, chatId, telegramId, coin, Number.parseInt(cents, 10));
+      }
+      // Account self-service
+      else if (data === 'acct:orders') await account.showMyOrders(ctx, chatId, telegramId);
+      else if (data.startsWith('acct:payo:'))
+        await account.showOrderPayment(ctx, chatId, sliceAfter(data, 'acct:payo:'));
+      else if (data.startsWith('acct:payb:'))
+        await account.showBookingPayment(ctx, chatId, sliceAfter(data, 'acct:payb:'));
       // Expert
       else if (data === 'exp:list') await expert.listJobs(ctx, chatId, telegramId);
       else if (data === 'exp:addr') await expert.promptSetAddress(ctx, chatId, telegramId);

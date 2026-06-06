@@ -3,10 +3,15 @@ import * as crypto from './crypto.js';
 import {
   listWatchableOrders,
   listWatchableBookings,
+  listWatchableDeposits,
   recordOrderTx,
   recordBookingTx,
+  markDepositCredited,
+  expireDeposit,
+  creditBalance,
 } from './supabase.js';
 import { confirmOrder, confirmBooking } from './flows/payments.js';
+import { usd } from './lib/format.js';
 
 // Poll public explorers for payments to each item's derived address and
 // auto-confirm once the confirmed received amount meets the quote (within a
@@ -69,6 +74,53 @@ async function settle(ctx, kind, item, confirm, recordTx) {
   }
 }
 
+// Wallet top-ups: credit whatever value actually arrives (no exact-amount
+// match needed), then DM the customer. Idempotent via markDepositCredited.
+async function settleDeposit(ctx, dep) {
+  if (!dep.pay_coin || !dep.pay_address) return;
+  let confirmedSats;
+  try {
+    ({ confirmed: confirmedSats } = await crypto.getConfirmedReceived(dep.pay_coin, dep.pay_address));
+  } catch (err) {
+    console.error(`watch deposit ${dep.id} (${dep.pay_coin}):`, err.message);
+    return;
+  }
+  if (confirmedSats <= 0) {
+    // Drop stale, never-funded deposits out of the watch set.
+    if (dep.pay_expires_at && Date.parse(dep.pay_expires_at) <= Date.now()) await expireDeposit(dep.id);
+    return;
+  }
+  const received = (confirmedSats / 1e8).toFixed(8);
+  let credited;
+  try {
+    credited = await crypto.valueUsdCents(dep.pay_coin, received);
+  } catch (err) {
+    console.error(`deposit value ${dep.id}:`, err.message);
+    return;
+  }
+  const tx = await crypto.getFundingTx(dep.pay_coin, dep.pay_address);
+  const marked = await markDepositCredited(dep.id, {
+    creditedCents: credited,
+    txid: tx?.txid ?? null,
+    blockHeight: tx?.blockHeight ?? null,
+  });
+  if (!marked) return; // already credited (idempotent)
+  const balance = await creditBalance(dep.telegram_id, credited, {
+    kind: 'deposit',
+    refType: 'deposit',
+    refId: dep.id,
+  });
+  try {
+    await ctx.bot.sendMessage(
+      dep.telegram_id,
+      `💰 Deposit received — *${usd(credited)}* added. Balance: *${usd(balance)}*.`,
+      { parse_mode: 'Markdown' }
+    );
+  } catch {
+    /* customer hasn't opened the bot */
+  }
+}
+
 export async function watchOnce(ctx) {
   const since = new Date(Date.now() - WINDOW_MS).toISOString();
   for (const o of await listWatchableOrders(since)) {
@@ -76,5 +128,8 @@ export async function watchOnce(ctx) {
   }
   for (const b of await listWatchableBookings(since)) {
     await settle(ctx, 'booking', b, confirmBooking, recordBookingTx);
+  }
+  for (const d of await listWatchableDeposits(since)) {
+    await settleDeposit(ctx, d);
   }
 }

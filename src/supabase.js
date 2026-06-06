@@ -589,3 +589,89 @@ export async function listLedger(telegramId, limit = 10) {
     .limit(limit);
   return data || [];
 }
+
+// ── Deposits (wallet top-ups, watched on-chain) ──────────────────────
+export async function createDeposit({
+  telegramId,
+  payCoin,
+  payAddress,
+  payIndex,
+  cryptoAmount,
+  usdCents,
+  payExpiresAt = null,
+  usdRate = null,
+}) {
+  const { data, error } = await supabase
+    .from('deposits')
+    .insert({
+      telegram_id: telegramId,
+      pay_coin: payCoin,
+      pay_address: payAddress,
+      pay_index: payIndex,
+      crypto_amount: cryptoAmount,
+      usd_cents: usdCents,
+      pay_expires_at: payExpiresAt,
+      usd_rate: usdRate,
+    })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function getDeposit(id) {
+  const { data } = await supabase.from('deposits').select('*').eq('id', id).maybeSingle();
+  return data;
+}
+
+export async function listWatchableDeposits(sinceIso) {
+  const { data } = await supabase
+    .from('deposits')
+    .select('*')
+    .eq('status', 'pending')
+    .not('pay_address', 'is', null)
+    .gt('created_at', sinceIso);
+  return data || [];
+}
+
+export async function expireDeposit(id) {
+  await supabase.from('deposits').update({ status: 'expired' }).eq('id', id).eq('status', 'pending');
+}
+
+// Conditional on still-pending so a double credit is a no-op (returns null).
+export async function markDepositCredited(id, { creditedCents, txid = null, blockHeight = null }) {
+  const { data } = await supabase
+    .from('deposits')
+    .update({
+      status: 'credited',
+      credited_cents: creditedCents,
+      pay_txid: txid,
+      pay_block_height: blockHeight,
+    })
+    .eq('id', id)
+    .eq('status', 'pending')
+    .select('*')
+    .maybeSingle();
+  return data;
+}
+
+// ── Account self-service (#1) ────────────────────────────────────────
+export async function listOrdersByTelegramId(telegramId, limit = 5) {
+  const { data } = await supabase
+    .from('orders')
+    .select('*')
+    .eq('telegram_id', telegramId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  return data || [];
+}
+
+export async function listBookingsByCustomer(telegramId, limit = 5) {
+  const { data } = await supabase
+    .from('bookings')
+    .select('*')
+    .eq('customer_telegram_id', telegramId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  return data || [];
+}
