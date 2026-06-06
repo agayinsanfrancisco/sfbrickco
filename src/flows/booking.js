@@ -10,9 +10,9 @@ export async function startBooking(ctx, chatId) {
   const days = upcomingDays(7);
   await ctx.bot.sendMessage(
     chatId,
-    `🛠️ *Book a LEGO expert*\n\n` +
+    `🛠️ *Book on-site build help*\n\n` +
       `Base fee ${usd(config.pricing.serviceFeeCents)} for a 1-hour on-site session, ` +
-      `plus a travel surcharge (Uber from Civic Center to you).\n\nPick a day:`,
+      `plus a travel surcharge (Uber from the builder to you).\n\nPick a day:`,
     { parse_mode: 'Markdown', ...daysKeyboard(days) }
   );
 }
@@ -55,15 +55,46 @@ export async function pickHour(ctx, chatId, startIso) {
 // New flow: create an OPEN job (no charge yet) and notify builders. The travel
 // cost is priced when a builder accepts (from that builder's address), then the
 // customer is sent a payment link.
+// Collect the address, then show a confirm summary before submitting (#9).
 export async function receiveAddress(ctx, chatId, telegramId, address) {
   const session = ctx.sessions.get(chatId);
   if (!session?.data?.startIso) {
-    await ctx.bot.sendMessage(chatId, 'Let’s start over — tap "Book a builder".');
+    await ctx.bot.sendMessage(chatId, 'Let’s start over — tap "Book build help".');
     ctx.sessions.delete(chatId);
     return;
   }
   const { startIso, endIso } = session.data;
+  ctx.sessions.set(chatId, { ...session, step: 'awaiting_confirm', data: { startIso, endIso, address } });
+  await ctx.bot.sendMessage(
+    chatId,
+    `Please confirm your request:\n\n🕒 ${fmtHourRange(startIso, endIso)}\n📍 ${address}\n` +
+      `💵 Base ${usd(config.pricing.serviceFeeCents)} + travel (priced when a builder accepts)`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '✅ Confirm request', callback_data: 'book:reqok' }],
+          [{ text: '✖ Cancel', callback_data: 'book:cancel' }],
+        ],
+      },
+    }
+  );
+}
+
+export async function confirmRequest(ctx, chatId, telegramId) {
+  const session = ctx.sessions.get(chatId);
+  if (session?.step !== 'awaiting_confirm' || !session?.data?.startIso) {
+    await ctx.bot.sendMessage(chatId, 'That request expired — tap /book to start again.');
+    return;
+  }
+  const { startIso, endIso, address } = session.data;
   ctx.sessions.delete(chatId);
+
+  // Re-check the slot at confirm time (it may have been taken meanwhile).
+  if (await slotTaken(startIso)) {
+    await ctx.bot.sendMessage(chatId, 'Sorry, that hour was just taken. Tap /book to pick another.');
+    return;
+  }
 
   const serviceFee = config.pricing.serviceFeeCents;
   const booking = await createBooking({

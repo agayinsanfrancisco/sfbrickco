@@ -1,5 +1,5 @@
 import { config } from '../config.js';
-import { listProducts, getProduct, createOrder } from '../supabase.js';
+import { listProducts, getProduct, createOrder, lastDeliveryAddress } from '../supabase.js';
 import { priceForProduct, packOptions } from '../lib/pricing.js';
 import { estimateSurcharge } from '../uber.js';
 import { qtyKeyboard } from '../lib/keyboards.js';
@@ -88,12 +88,27 @@ async function beginDelivery(ctx, chatId, sku, qty) {
     await ctx.bot.sendMessage(chatId, 'That quantity isn’t available for this product.');
     return;
   }
-  ctx.sessions.set(chatId, { flow: 'shop', step: 'awaiting_delivery_address', sku, qty });
+  // Offer the customer's last delivery address (#42). In private chat
+  // chatId === telegramId, so it doubles as the user key for the lookup.
+  const last = await lastDeliveryAddress(chatId);
+  ctx.sessions.set(chatId, { flow: 'shop', step: 'awaiting_delivery_address', sku, qty, lastAddr: last });
+  const reply_markup = last
+    ? { inline_keyboard: [[{ text: `📍 Use last: ${last.slice(0, 40)}`, callback_data: 'shop:lastaddr' }]] }
+    : undefined;
   await ctx.bot.sendMessage(
     chatId,
     `📍 What’s the *delivery address*? We courier your ${p.name} by Uber and add the delivery fee at checkout.`,
-    { parse_mode: 'Markdown' }
+    { parse_mode: 'Markdown', reply_markup }
   );
+}
+
+export async function useLastAddress(ctx, chatId) {
+  const s = ctx.sessions.get(chatId);
+  if (!s?.lastAddr) {
+    await ctx.bot.sendMessage(chatId, 'Please type your delivery address.');
+    return;
+  }
+  await receiveDeliveryAddress(ctx, chatId, chatId, s.lastAddr);
 }
 
 export async function receiveDeliveryAddress(ctx, chatId, _telegramId, address) {
@@ -104,7 +119,7 @@ export async function receiveDeliveryAddress(ctx, chatId, _telegramId, address) 
   ctx.sessions.set(chatId, { ...s, step: 'awaiting_phone', address, deliveryFee });
   await ctx.bot.sendMessage(
     chatId,
-    '📱 Last step — share your phone number so the courier can reach you (or just type it):',
+    '📱 Share your phone number so the courier can reach you (or just type it):',
     {
       reply_markup: {
         keyboard: [[{ text: '📱 Share my number', request_contact: true }]],
@@ -118,6 +133,17 @@ export async function receiveDeliveryAddress(ctx, chatId, _telegramId, address) 
 export async function receivePhone(ctx, chatId, telegramId, phone, handle) {
   const s = ctx.sessions.get(chatId);
   if (!s?.sku || s.step !== 'awaiting_phone') return;
+  ctx.sessions.set(chatId, { ...s, step: 'awaiting_note', phone: phone || null, handle: handle || null });
+  await ctx.bot.sendMessage(
+    chatId,
+    '📝 Any delivery notes (gate code, unit #, drop-off spot)? Type a message, or tap Skip.',
+    { reply_markup: { inline_keyboard: [[{ text: 'Skip', callback_data: 'shop:noteskip' }]] } }
+  );
+}
+
+async function finalizeOrder(ctx, chatId, telegramId, note) {
+  const s = ctx.sessions.get(chatId);
+  if (!s?.sku || s.step !== 'awaiting_note') return;
   ctx.sessions.delete(chatId);
   const p = await getProduct(s.sku);
   const itemCents = priceForProduct(p, s.qty);
@@ -128,12 +154,21 @@ export async function receivePhone(ctx, chatId, telegramId, phone, handle) {
     amountCents: itemCents,
     deliveryFeeCents: s.deliveryFee,
     deliveryAddress: s.address,
-    contactPhone: phone || null,
-    contactHandle: handle || null,
+    contactPhone: s.phone,
+    contactHandle: s.handle,
+    notes: note,
   });
   await ctx.bot.sendMessage(chatId, `✅ Order *${shortRef(order.id)}* created — thanks!`, {
     parse_mode: 'Markdown',
     reply_markup: { remove_keyboard: true },
   });
   await presentOrderMethods(ctx, chatId, order, p);
+}
+
+export async function receiveNote(ctx, chatId, telegramId, text) {
+  await finalizeOrder(ctx, chatId, telegramId, text);
+}
+
+export async function skipNote(ctx, chatId, telegramId) {
+  await finalizeOrder(ctx, chatId, telegramId, null);
 }

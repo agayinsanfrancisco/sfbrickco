@@ -7,6 +7,8 @@ import {
   getBalance,
   getOrder,
   getProduct,
+  cancelOrder,
+  cancelBookingById,
 } from '../supabase.js';
 import { presentOrderMethods, presentBookingMethods } from './payments.js';
 
@@ -60,7 +62,14 @@ export async function showMyOrders(ctx, chatId, telegramId) {
     const text = `🧾 *${shortRef(o.id)}* — ${o.qty}× ${o.sku}\n${ORDER_STATUS[o.status] || o.status} · ${usd(total)}`;
     const reply_markup =
       o.status === 'pending'
-        ? { inline_keyboard: [[{ text: '💳 Show payment', callback_data: `acct:payo:${o.id}` }]] }
+        ? {
+            inline_keyboard: [
+              [
+                { text: '💳 Show payment', callback_data: `acct:payo:${o.id}` },
+                { text: '✖ Cancel', callback_data: `acct:cano:${o.id}` },
+              ],
+            ],
+          }
         : undefined;
     await ctx.bot.sendMessage(chatId, text, { parse_mode: 'Markdown', reply_markup });
   }
@@ -74,11 +83,37 @@ export async function showMyOrders(ctx, chatId, telegramId) {
     const text = `🛠️ *${shortRef(b.id)}* — ${fmtHourRange(b.slot_start, b.slot_end)}\n${status} · ${usd(b.total_cents)}`;
     const canPay =
       b.payment_status === 'unpaid' && b.surcharge_source !== 'pending' && b.status === 'awaiting_payment';
-    const reply_markup = canPay
-      ? { inline_keyboard: [[{ text: '💳 Show payment', callback_data: `acct:payb:${b.id}` }]] }
-      : undefined;
+    const canCancel =
+      b.payment_status === 'unpaid' && ['awaiting_acceptance', 'awaiting_payment'].includes(b.status);
+    const buttons = [];
+    if (canPay) buttons.push({ text: '💳 Show payment', callback_data: `acct:payb:${b.id}` });
+    if (canCancel) buttons.push({ text: '✖ Cancel', callback_data: `acct:canb:${b.id}` });
+    const reply_markup = buttons.length ? { inline_keyboard: [buttons] } : undefined;
     await ctx.bot.sendMessage(chatId, text, { parse_mode: 'Markdown', reply_markup });
   }
+}
+
+export async function cancelMyOrder(ctx, chatId, telegramId, orderId) {
+  const order = await getOrder(orderId);
+  if (!order || order.telegram_id !== telegramId) {
+    await ctx.bot.sendMessage(chatId, 'Order not found.');
+    return;
+  }
+  const cancelled = await cancelOrder(orderId);
+  await ctx.bot.sendMessage(
+    chatId,
+    cancelled ? `✖ Order ${shortRef(orderId)} cancelled.` : 'That order can no longer be cancelled.'
+  );
+}
+
+export async function cancelMyBooking(ctx, chatId, telegramId, bookingId) {
+  const cancelled = await cancelBookingById(bookingId);
+  await ctx.bot.sendMessage(
+    chatId,
+    cancelled
+      ? `✖ Booking ${shortRef(bookingId)} cancelled — the slot is free again.`
+      : 'That booking can no longer be cancelled (it may already be paid).'
+  );
 }
 
 export async function showOrderPayment(ctx, chatId, orderId) {

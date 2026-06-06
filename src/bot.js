@@ -114,6 +114,8 @@ export function createBot() {
         await shop.receiveDeliveryAddress(ctx, chatId, telegramId, msg.text.trim());
       } else if (s.flow === 'shop' && s.step === 'awaiting_phone') {
         await shop.receivePhone(ctx, chatId, telegramId, msg.text.trim(), msg.from.username);
+      } else if (s.flow === 'shop' && s.step === 'awaiting_note') {
+        await shop.receiveNote(ctx, chatId, telegramId, msg.text.trim());
       } else if (s.flow === 'book' && s.step === 'awaiting_address') {
         await booking.receiveAddress(ctx, chatId, telegramId, msg.text.trim());
       } else if (s.flow === 'admin' && s.step === 'awaiting_add_expert') {
@@ -152,6 +154,8 @@ export function createBot() {
       } else if (data === 'shop:qty:custom') await shop.promptCustomQty(ctx, chatId);
       else if (data.startsWith('shop:qty:'))
         await shop.chooseQty(ctx, chatId, Number.parseInt(sliceAfter(data, 'shop:qty:'), 10));
+      else if (data === 'shop:lastaddr') await shop.useLastAddress(ctx, chatId);
+      else if (data === 'shop:noteskip') await shop.skipNote(ctx, chatId, telegramId);
       // Booking
       else if (data === 'book:start') await booking.startBooking(ctx, chatId);
       else if (data.startsWith('book:day:'))
@@ -160,6 +164,7 @@ export function createBot() {
         await booking.pickHour(ctx, chatId, sliceAfter(data, 'book:hour:'));
       else if (data.startsWith('book:pay:'))
         await booking.payBooking(ctx, chatId, telegramId, sliceAfter(data, 'book:pay:'));
+      else if (data === 'book:reqok') await booking.confirmRequest(ctx, chatId, telegramId);
       else if (data === 'book:cancel') await booking.cancelBooking(ctx, chatId);
       // Payments (method selection / crypto / admin confirm)
       else if (data.startsWith('pm:')) {
@@ -195,6 +200,10 @@ export function createBot() {
         await account.showOrderPayment(ctx, chatId, sliceAfter(data, 'acct:payo:'));
       else if (data.startsWith('acct:payb:'))
         await account.showBookingPayment(ctx, chatId, sliceAfter(data, 'acct:payb:'));
+      else if (data.startsWith('acct:cano:'))
+        await account.cancelMyOrder(ctx, chatId, telegramId, sliceAfter(data, 'acct:cano:'));
+      else if (data.startsWith('acct:canb:'))
+        await account.cancelMyBooking(ctx, chatId, telegramId, sliceAfter(data, 'acct:canb:'));
       // Expert
       else if (data === 'exp:list') await expert.listJobs(ctx, chatId, telegramId);
       else if (data === 'exp:addr') await expert.promptSetAddress(ctx, chatId, telegramId);

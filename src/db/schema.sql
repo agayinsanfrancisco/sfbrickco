@@ -29,6 +29,7 @@ create table if not exists orders (
   delivery_address   text,
   contact_phone      text,
   contact_handle     text,
+  notes              text,                       -- optional delivery instructions (#32)
   status             text not null default 'pending'
                        check (status in ('pending', 'paid', 'accepted', 'dispatched',
                                          'delivered', 'cancelled', 'refunded')),

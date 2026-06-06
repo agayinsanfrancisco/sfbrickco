@@ -159,6 +159,7 @@ export async function createOrder({
   deliveryAddress = null,
   contactPhone = null,
   contactHandle = null,
+  notes = null,
 }) {
   const { data, error } = await supabase
     .from('orders')
@@ -171,11 +172,51 @@ export async function createOrder({
       delivery_address: deliveryAddress,
       contact_phone: contactPhone,
       contact_handle: contactHandle,
+      notes,
     })
     .select('*')
     .single();
   if (error) throw error;
   return data;
+}
+
+// Customer self-cancel: only while still pending (returns the row, or null).
+export async function cancelOrder(id) {
+  const { data } = await supabase
+    .from('orders')
+    .update({ status: 'cancelled' })
+    .eq('id', id)
+    .eq('status', 'pending')
+    .select('*')
+    .maybeSingle();
+  return data;
+}
+
+// Cancel a booking that hasn't been paid yet → frees the slot (slotTaken only
+// counts active statuses). Returns the row, or null if it wasn't cancellable.
+export async function cancelBookingById(id) {
+  const { data } = await supabase
+    .from('bookings')
+    .update({ status: 'cancelled' })
+    .eq('id', id)
+    .eq('payment_status', 'unpaid')
+    .in('status', ['awaiting_acceptance', 'awaiting_payment'])
+    .select('*')
+    .maybeSingle();
+  return data;
+}
+
+// Most recent delivery address this customer used (#42).
+export async function lastDeliveryAddress(telegramId) {
+  const { data } = await supabase
+    .from('orders')
+    .select('delivery_address')
+    .eq('telegram_id', telegramId)
+    .not('delivery_address', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data?.delivery_address || null;
 }
 
 // Attach the chosen coin + derived address + quoted amount + locked rate +
