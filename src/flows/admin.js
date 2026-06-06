@@ -17,10 +17,15 @@ import {
   listRecentOrders,
   markOrderRefunded,
   markBookingRefunded,
+  setSetting,
+  getInventory,
+  setProductPrice,
+  createProduct,
 } from '../supabase.js';
 import { manualSurchargeCents, estimateBetween } from '../uber.js';
 import { adminMenu } from '../lib/keyboards.js';
 import { usd, fmtHourRange, shortRef } from '../lib/format.js';
+import { getIntSetting, invalidateSettings } from '../lib/settings.js';
 
 function ensureAdmin(ctx, chatId, telegramId) {
   if (!isAdminId(telegramId)) {
@@ -45,12 +50,15 @@ export async function showUsers(ctx, chatId, telegramId) {
     await ctx.bot.sendMessage(chatId, 'No users yet.');
     return;
   }
-  const lines = users.map(
+  const PAGE = 50; // cap to stay well under Telegram's message limit (#47)
+  const shown = users.slice(0, PAGE);
+  const lines = shown.map(
     (u) =>
       `• ${u.full_name || u.username || 'unknown'} — \`${u.telegram_id}\` — ${u.role}${
         u.active ? '' : ' (inactive)'
       }`
   );
+  if (users.length > PAGE) lines.push(`\n_…and ${users.length - PAGE} more (showing first ${PAGE})._`);
   await ctx.bot.sendMessage(chatId, lines.join('\n'), { parse_mode: 'Markdown' });
 }
 
@@ -287,6 +295,120 @@ export async function doRefund(ctx, chatId, text) {
   }
 }
 
+// ── Editable fees (#44) ──────────────────────────────────────────────
+export async function showFees(ctx, chatId, telegramId) {
+  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const [service, base, perMile] = await Promise.all([
+    getIntSetting('service_fee_cents', config.pricing.serviceFeeCents),
+    getIntSetting('uber_base_cents', config.uber.baseCents),
+    getIntSetting('uber_per_mile_cents', config.uber.perMileCents),
+  ]);
+  await ctx.bot.sendMessage(
+    chatId,
+    `💲 *Fees*\n• Service fee: ${usd(service)}\n• Travel base: ${usd(base)}\n• Per mile: ${usd(perMile)}`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: 'Edit service fee', callback_data: 'adm:fee:service' }],
+          [{ text: 'Edit travel base', callback_data: 'adm:fee:base' }],
+          [{ text: 'Edit per-mile', callback_data: 'adm:fee:permile' }],
+        ],
+      },
+    }
+  );
+}
+
+const FEE_KEYS = { service: 'service_fee_cents', base: 'uber_base_cents', permile: 'uber_per_mile_cents' };
+
+export async function promptSetFee(ctx, chatId, telegramId, which) {
+  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  if (!FEE_KEYS[which]) return;
+  ctx.sessions.set(chatId, { flow: 'admin', step: 'awaiting_fee', data: { which } });
+  await ctx.bot.sendMessage(chatId, `Enter the new amount in dollars for *${which}* (e.g. 50):`, {
+    parse_mode: 'Markdown',
+  });
+}
+
+export async function doSetFee(ctx, chatId, text) {
+  const session = ctx.sessions.get(chatId);
+  const which = session?.data?.which;
+  ctx.sessions.delete(chatId);
+  const key = FEE_KEYS[which];
+  if (!key) return;
+  const dollars = Number.parseFloat(String(text).replace(/[^0-9.]/g, ''));
+  if (Number.isNaN(dollars) || dollars < 0) {
+    await ctx.bot.sendMessage(chatId, 'Please enter a valid non-negative amount.');
+    return;
+  }
+  await setSetting(key, Math.round(dollars * 100));
+  invalidateSettings();
+  await ctx.bot.sendMessage(chatId, `✅ ${which} set to ${usd(Math.round(dollars * 100))}.`);
+}
+
+// ── Price editing + add SKU (#29) ────────────────────────────────────
+export async function promptSetPrice(ctx, chatId, telegramId, sku) {
+  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  ctx.sessions.set(chatId, { flow: 'admin', step: 'awaiting_price', data: { sku } });
+  await ctx.bot.sendMessage(
+    chatId,
+    `Enter the new price for \`${sku}\` as: *unit* [*bundleQty* *bundlePrice*]\n` +
+      `e.g. \`10\` or \`10 6 45\` (= $10 each, 6 for $45).`,
+    { parse_mode: 'Markdown' }
+  );
+}
+
+export async function doSetPrice(ctx, chatId, text) {
+  const session = ctx.sessions.get(chatId);
+  const sku = session?.data?.sku;
+  ctx.sessions.delete(chatId);
+  if (!sku) return;
+  const parts = String(text).trim().split(/\s+/).map((n) => Number.parseFloat(n));
+  const [unit, bundleQty, bundlePrice] = parts;
+  if (Number.isNaN(unit) || unit < 0) {
+    await ctx.bot.sendMessage(chatId, 'Couldn’t parse the unit price. Try again from the inventory.');
+    return;
+  }
+  const patch = { unitPriceCents: Math.round(unit * 100) };
+  if (!Number.isNaN(bundleQty) && !Number.isNaN(bundlePrice)) {
+    patch.bundleQty = Math.round(bundleQty);
+    patch.bundlePriceCents = Math.round(bundlePrice * 100);
+  }
+  const updated = await setProductPrice(sku, patch);
+  await ctx.bot.sendMessage(
+    chatId,
+    updated ? `✅ ${updated.name} priced at ${usd(updated.unit_price_cents)} each.` : 'SKU not found.'
+  );
+}
+
+export async function promptAddSku(ctx, chatId, telegramId) {
+  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  ctx.sessions.set(chatId, { flow: 'admin', step: 'awaiting_add_sku' });
+  await ctx.bot.sendMessage(
+    chatId,
+    'Add a product as: `sku | Name | unitDollars`\ne.g. `red-2x4 | Red 2x4 brick | 3.50`',
+    { parse_mode: 'Markdown' }
+  );
+}
+
+export async function doAddSku(ctx, chatId, text) {
+  ctx.sessions.delete(chatId);
+  const [sku, name, price] = String(text).split('|').map((s) => s.trim());
+  const dollars = Number.parseFloat(price);
+  if (!sku || !name || Number.isNaN(dollars) || dollars < 0) {
+    await ctx.bot.sendMessage(chatId, 'Format: `sku | Name | unitDollars`. Try again.', { parse_mode: 'Markdown' });
+    return;
+  }
+  try {
+    const p = await createProduct({ sku, name, unitPriceCents: Math.round(dollars * 100) });
+    await ctx.bot.sendMessage(chatId, `✅ Added *${p.name}* (\`${p.sku}\`) at ${usd(p.unit_price_cents)}. Set stock from the inventory menu.`, {
+      parse_mode: 'Markdown',
+    });
+  } catch (err) {
+    await ctx.bot.sendMessage(chatId, `Couldn’t add it: ${err.message}`);
+  }
+}
+
 // ── Inventory ────────────────────────────────────────────────────────
 export async function showInventory(ctx, chatId, telegramId) {
   if (!ensureAdmin(ctx, chatId, telegramId)) return;
@@ -296,9 +418,16 @@ export async function showInventory(ctx, chatId, telegramId) {
     return;
   }
   const rows = items.map((it) => [
-    { text: `✏️ Set ${it.name} (now ${it.stock_qty})`, callback_data: `adm:stock:${it.sku}` },
+    { text: `📦 Stock ${it.name} (${it.stock_qty})`, callback_data: `adm:stock:${it.sku}` },
+    { text: `💲 Price`, callback_data: `adm:price:${it.sku}` },
   ]);
-  const lines = items.map((it) => `• ${it.name} (\`${it.sku}\`): *${it.stock_qty}* in stock`);
+  rows.push([{ text: '➕ Add product', callback_data: 'adm:addsku' }]);
+  const lines = items.map(
+    (it) =>
+      `• ${it.name} (\`${it.sku}\`): *${it.stock_qty}* in stock · ${usd(it.unit_price_cents || 0)} ea${
+        it.active ? '' : ' (hidden)'
+      }`
+  );
   await ctx.bot.sendMessage(chatId, `📦 *Inventory*\n${lines.join('\n')}`, {
     parse_mode: 'Markdown',
     reply_markup: { inline_keyboard: rows },

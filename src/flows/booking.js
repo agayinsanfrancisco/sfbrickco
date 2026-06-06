@@ -3,15 +3,21 @@ import { createBooking, slotTaken } from '../supabase.js';
 import { upcomingDays, hourlySlots } from '../lib/slots.js';
 import { daysKeyboard, hoursKeyboard } from '../lib/keyboards.js';
 import { usd, fmtHourRange } from '../lib/format.js';
+import { getIntSetting } from '../lib/settings.js';
 import { presentBookingMethods } from './payments.js';
 import { notifyExpertsOfOpenBooking } from './expert.js';
+
+// Service fee: admin-editable setting, falling back to the env-derived default.
+export function serviceFeeCents() {
+  return getIntSetting('service_fee_cents', config.pricing.serviceFeeCents);
+}
 
 export async function startBooking(ctx, chatId) {
   const days = upcomingDays(7);
   await ctx.bot.sendMessage(
     chatId,
     `🛠️ *Book on-site build help*\n\n` +
-      `Base fee ${usd(config.pricing.serviceFeeCents)} for a 1-hour on-site session, ` +
+      `Base fee ${usd(await serviceFeeCents())} for a 1-hour on-site session, ` +
       `plus a travel surcharge (Uber from the builder to you).\n\nPick a day:`,
     { parse_mode: 'Markdown', ...daysKeyboard(days) }
   );
@@ -74,7 +80,7 @@ export async function receiveAddress(ctx, chatId, telegramId, address) {
   await ctx.bot.sendMessage(
     chatId,
     `Please confirm your request:\n\n🕒 ${fmtHourRange(startIso, endIso)}\n📍 ${address}\n` +
-      `💵 Base ${usd(config.pricing.serviceFeeCents)} + travel (priced when a builder accepts)`,
+      `💵 Base ${usd(await serviceFeeCents())} + travel (priced when a builder accepts)`,
     {
       parse_mode: 'Markdown',
       reply_markup: {
@@ -102,7 +108,7 @@ export async function confirmRequest(ctx, chatId, telegramId) {
     return;
   }
 
-  const serviceFee = config.pricing.serviceFeeCents;
+  const serviceFee = await serviceFeeCents();
   const booking = await createBooking({
     customer_telegram_id: telegramId,
     customer_address: address,

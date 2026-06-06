@@ -133,6 +133,12 @@ export function createBot() {
         await admin.doFindOrder(ctx, chatId, msg.text);
       } else if (s.flow === 'admin' && s.step === 'awaiting_refund_txid') {
         await admin.doRefund(ctx, chatId, msg.text);
+      } else if (s.flow === 'admin' && s.step === 'awaiting_fee') {
+        await admin.doSetFee(ctx, chatId, msg.text);
+      } else if (s.flow === 'admin' && s.step === 'awaiting_price') {
+        await admin.doSetPrice(ctx, chatId, msg.text);
+      } else if (s.flow === 'admin' && s.step === 'awaiting_add_sku') {
+        await admin.doAddSku(ctx, chatId, msg.text);
       } else if (s.flow === 'expert' && s.step === 'awaiting_builder_address') {
         await expert.doSetAddress(ctx, chatId, telegramId, msg.text.trim());
       } else if (s.flow === 'review' && s.step === 'awaiting_comment') {
@@ -238,6 +244,12 @@ export function createBot() {
       else if (data.startsWith('adm:refundb:'))
         await admin.promptRefund(ctx, chatId, telegramId, 'b', sliceAfter(data, 'adm:refundb:'));
       else if (data === 'adm:inv') await admin.showInventory(ctx, chatId, telegramId);
+      else if (data === 'adm:fees') await admin.showFees(ctx, chatId, telegramId);
+      else if (data.startsWith('adm:fee:'))
+        await admin.promptSetFee(ctx, chatId, telegramId, sliceAfter(data, 'adm:fee:'));
+      else if (data.startsWith('adm:price:'))
+        await admin.promptSetPrice(ctx, chatId, telegramId, sliceAfter(data, 'adm:price:'));
+      else if (data === 'adm:addsku') await admin.promptAddSku(ctx, chatId, telegramId);
       else if (data.startsWith('adm:stock:'))
         await admin.promptSetStock(ctx, chatId, telegramId, sliceAfter(data, 'adm:stock:'));
       else if (data.startsWith('adm:assignto:')) {

@@ -1,7 +1,17 @@
 import { config } from './config.js';
+import { getIntSetting } from './lib/settings.js';
 
 const R_MILES = 3958.8; // Earth radius in miles
 const ROAD_FACTOR = 1.3; // straight-line → approximate driving distance
+
+// Admin-editable rates (#44), falling back to env-derived config.
+async function rates() {
+  const [baseCents, perMileCents] = await Promise.all([
+    getIntSetting('uber_base_cents', config.uber.baseCents),
+    getIntSetting('uber_per_mile_cents', config.uber.perMileCents),
+  ]);
+  return { baseCents, perMileCents };
+}
 
 function haversineMiles(lat1, lng1, lat2, lng2) {
   const toRad = (d) => (d * Math.PI) / 180;
@@ -47,8 +57,8 @@ export async function estimateSurcharge(address) {
     haversineMiles(config.uber.originLat, config.uber.originLng, dest.lat, dest.lng) *
     ROAD_FACTOR;
 
-  const surchargeCents =
-    config.uber.baseCents + Math.round(miles * config.uber.perMileCents);
+  const { baseCents, perMileCents } = await rates();
+  const surchargeCents = baseCents + Math.round(miles * perMileCents);
 
   return { ok: true, miles: Math.round(miles * 10) / 10, surchargeCents };
 }
@@ -60,7 +70,8 @@ export async function estimateBetween(originAddress, destAddress) {
   if (!o || !d) return { ok: false };
   const miles =
     haversineMiles(o.lat, o.lng, d.lat, d.lng) * ROAD_FACTOR;
-  const surchargeCents = config.uber.baseCents + Math.round(miles * config.uber.perMileCents);
+  const { baseCents, perMileCents } = await rates();
+  const surchargeCents = baseCents + Math.round(miles * perMileCents);
   return { ok: true, miles: Math.round(miles * 10) / 10, surchargeCents };
 }
 

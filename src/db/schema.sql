@@ -125,6 +125,14 @@ create table if not exists pay_counters (
   next_index  int not null default 0
 );
 
+-- ── Settings (admin-editable key/value) ──────────────────────────────
+create table if not exists settings (
+  key        text primary key,
+  value      text not null,
+  updated_at timestamptz not null default now()
+);
+alter table settings enable row level security;
+
 -- ── Builder invites (pre-approved @handles) ──────────────────────────
 create table if not exists builder_invites (
   username    text primary key,

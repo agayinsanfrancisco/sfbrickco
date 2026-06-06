@@ -110,6 +110,7 @@ export function adminMenu() {
         [{ text: '🔎 Find order', callback_data: 'adm:find' }],
         [{ text: '📣 Broadcast', callback_data: 'adm:broadcast' }],
         [{ text: '📦 Inventory', callback_data: 'adm:inv' }],
+        [{ text: '💲 Fees', callback_data: 'adm:fees' }],
       ],
     },
   };

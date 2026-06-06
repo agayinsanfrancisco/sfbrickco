@@ -592,6 +592,44 @@ export async function listInventory() {
   return data || [];
 }
 
+// ── Settings (admin-editable key/value) (#44) ────────────────────────
+export async function getAllSettings() {
+  const { data } = await supabase.from('settings').select('key, value');
+  return data || [];
+}
+
+export async function setSetting(key, value) {
+  await supabase
+    .from('settings')
+    .upsert({ key, value: String(value), updated_at: new Date().toISOString() }, { onConflict: 'key' });
+}
+
+// ── Price editing + add SKU (#29) ────────────────────────────────────
+export async function setProductPrice(sku, { unitPriceCents, bundleQty = null, bundlePriceCents = null }) {
+  const patch = { unit_price_cents: unitPriceCents, updated_at: new Date().toISOString() };
+  if (bundleQty != null) patch.bundle_qty = bundleQty;
+  if (bundlePriceCents != null) patch.bundle_price_cents = bundlePriceCents;
+  const { data } = await supabase.from('inventory').update(patch).eq('sku', sku).select('*').maybeSingle();
+  return data;
+}
+
+export async function createProduct({ sku, name, unitPriceCents, stockQty = 0 }) {
+  const { data, error } = await supabase
+    .from('inventory')
+    .insert({
+      sku,
+      name,
+      unit_price_cents: unitPriceCents,
+      price_mode: 'unit_bundle',
+      stock_qty: stockQty,
+      active: true,
+    })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
 export async function setProductActive(sku, active) {
   const { data } = await supabase
     .from('inventory')
