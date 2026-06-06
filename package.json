@@ -10,7 +10,7 @@
     "test": "vitest run"
   },
   "devDependencies": {
-    "vitest": "^2.1.8"
+    "vitest": "^4.1.0"
   },
   "dependencies": {
     "@noble/hashes": "^1.8.0",
