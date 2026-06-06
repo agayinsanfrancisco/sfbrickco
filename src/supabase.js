@@ -229,21 +229,13 @@ export async function getProduct(sku) {
   return getInventory(sku);
 }
 
-// Allocate the next derivation index for a coin (read-modify-write; fine at
-// this volume). Returns the index to use for this payment.
+// Allocate the next derivation index for a coin. Atomic via the
+// next_derivation_index() Postgres function (upsert+increment under a row
+// lock) so concurrent payments can never receive the same address.
 export async function nextDerivationIndex(coin) {
-  const { data: row } = await supabase
-    .from('pay_counters')
-    .select('next_index')
-    .eq('coin', coin)
-    .maybeSingle();
-  const idx = row?.next_index ?? 0;
-  await supabase
-    .from('pay_counters')
-    .update({ next_index: idx + 1 })
-    .eq('coin', coin)
-    .eq('next_index', idx);
-  return idx;
+  const { data, error } = await supabase.rpc('next_derivation_index', { p_coin: coin });
+  if (error) throw error;
+  return data; // integer index to use for this payment
 }
 
 // Orders awaiting a crypto payment to a derived address, created recently.
@@ -273,10 +265,6 @@ export async function getOrder(id) {
   return data;
 }
 
-export async function attachOrderSession(orderId, sessionId) {
-  await supabase.from('orders').update({ stripe_session_id: sessionId }).eq('id', orderId);
-}
-
 // Conditional on still-pending, so confirming twice (watcher + admin) is a
 // no-op the second time — returns null if it was already paid.
 export async function markOrderPaid(orderId) {
@@ -299,13 +287,6 @@ export async function createBooking(fields) {
     .single();
   if (error) throw error;
   return data;
-}
-
-export async function attachBookingSession(bookingId, sessionId) {
-  await supabase
-    .from('bookings')
-    .update({ stripe_session_id: sessionId })
-    .eq('id', bookingId);
 }
 
 export async function getBooking(id) {
@@ -485,18 +466,75 @@ export async function setStock(sku, qty) {
   return data;
 }
 
-// Decrement only if enough stock remains. Returns the updated row, or null if
-// insufficient (the .gte guard makes the conditional update race-safe enough
-// for this volume).
+// Decrement only if enough stock remains. Atomic via the decrement_stock()
+// Postgres function (single conditional UPDATE under a row lock) so two
+// confirmations can't oversell. Returns { sku, stock_qty } with the remaining
+// count, or null if there wasn't enough stock.
 export async function decrementStock(sku, qty) {
-  const inv = await getInventory(sku);
-  if (!inv || inv.stock_qty < qty) return null;
+  const { data, error } = await supabase.rpc('decrement_stock', { p_sku: sku, p_qty: qty });
+  if (error) throw error;
+  if (data === null || data === undefined) return null;
+  return { sku, stock_qty: data };
+}
+
+// ── Atomic stock reservation (#39) ───────────────────────────────────
+// Reserve stock against available (stock_qty − reserved_qty) at order time;
+// release on payment/cancel/expiry. Returns available-after, or null if
+// insufficient. Wired into the order + cancellation flows in later phases.
+export async function reserveStock(sku, qty) {
+  const { data, error } = await supabase.rpc('reserve_stock', { p_sku: sku, p_qty: qty });
+  if (error) throw error;
+  return data ?? null;
+}
+
+export async function releaseReservation(sku, qty) {
+  const { error } = await supabase.rpc('release_reservation', { p_sku: sku, p_qty: qty });
+  if (error) throw error;
+}
+
+// ── Wallet: balance ledger (#prepaid wallet) ─────────────────────────
+// All balance mutations go through the credit_balance / debit_balance
+// Postgres functions, which update users.balance_cents and append a ledger
+// row atomically under a row lock.
+export async function getBalance(telegramId) {
   const { data } = await supabase
-    .from('inventory')
-    .update({ stock_qty: inv.stock_qty - qty, updated_at: new Date().toISOString() })
-    .eq('sku', sku)
-    .gte('stock_qty', qty)
-    .select('*')
+    .from('users')
+    .select('balance_cents')
+    .eq('telegram_id', telegramId)
     .maybeSingle();
-  return data;
+  return data?.balance_cents ?? 0;
+}
+
+export async function creditBalance(telegramId, deltaCents, { kind, refType = null, refId = null }) {
+  const { data, error } = await supabase.rpc('credit_balance', {
+    p_telegram_id: telegramId,
+    p_delta_cents: deltaCents,
+    p_kind: kind,
+    p_ref_type: refType,
+    p_ref_id: refId,
+  });
+  if (error) throw error;
+  return data; // new balance
+}
+
+// Returns the new balance, or null if the balance was insufficient.
+export async function debitBalance(telegramId, amountCents, { refType = null, refId = null } = {}) {
+  const { data, error } = await supabase.rpc('debit_balance', {
+    p_telegram_id: telegramId,
+    p_amount_cents: amountCents,
+    p_ref_type: refType,
+    p_ref_id: refId,
+  });
+  if (error) throw error;
+  return data ?? null;
+}
+
+export async function listLedger(telegramId, limit = 10) {
+  const { data } = await supabase
+    .from('ledger')
+    .select('*')
+    .eq('telegram_id', telegramId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  return data || [];
 }

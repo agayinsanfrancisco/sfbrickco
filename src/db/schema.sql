@@ -1,6 +1,7 @@
--- Heaux SF — Supabase schema
--- Run this in the Supabase SQL editor (or `supabase db push`) before first start.
+-- SF Brick Company — Supabase schema (canonical source of truth)
+-- Run in the Supabase SQL editor (or `supabase db push`) before first start.
 -- gen_random_uuid() comes from pgcrypto, enabled by default on Supabase.
+-- All tables are service-role only (RLS enabled, no public policies).
 
 -- ── Users ────────────────────────────────────────────────────────────
 create table if not exists users (
@@ -11,22 +12,40 @@ create table if not exists users (
   role          text not null default 'customer'
                   check (role in ('customer', 'expert', 'admin')),
   active        boolean not null default true,
+  address       text,                          -- builder base address (surcharge origin)
+  balance_cents integer not null default 0,     -- prepaid wallet balance (USD cents)
   created_at    timestamptz not null default now()
 );
+alter table users enable row level security;
 
--- ── Orders (red LEGO product sales) ──────────────────────────────────
+-- ── Orders (3D-printed accessory sales) ──────────────────────────────
 create table if not exists orders (
   id                 uuid primary key default gen_random_uuid(),
   telegram_id        bigint not null,
+  sku                text,
   qty                int not null check (qty > 0),
-  amount_cents       int not null check (amount_cents >= 0),
-  stripe_session_id  text,
+  amount_cents       int not null check (amount_cents >= 0),   -- item subtotal
+  delivery_fee_cents int not null default 0,
+  delivery_address   text,
+  contact_phone      text,
+  contact_handle     text,
   status             text not null default 'pending'
-                       check (status in ('pending', 'paid', 'cancelled')),
+                       check (status in ('pending', 'paid', 'accepted',
+                                         'dispatched', 'delivered', 'cancelled')),
+  -- payment (crypto)
+  payment_method     text,
+  crypto_amount      text,
+  pay_coin           text,
+  pay_address        text,
+  pay_index          int,
+  idempotency_key    text,                       -- dedupe double-submits (#48)
   created_at         timestamptz not null default now()
 );
+create unique index if not exists orders_idempotency_key_uq
+  on orders (idempotency_key) where idempotency_key is not null;
+create index if not exists orders_status_created_idx on orders (status, created_at);
 
--- ── Bookings (LEGO-expert setup service) ─────────────────────────────
+-- ── Bookings (on-site build-help service) ────────────────────────────
 create table if not exists bookings (
   id                    uuid primary key default gen_random_uuid(),
   customer_telegram_id  bigint not null,
@@ -40,18 +59,24 @@ create table if not exists bookings (
                           check (surcharge_source in ('estimate', 'manual', 'pending')),
   distance_miles        numeric,
   total_cents           int not null,
-  stripe_session_id     text,
   payment_status        text not null default 'unpaid'
                           check (payment_status in ('unpaid', 'paid')),
   status                text not null default 'awaiting_payment'
-                          check (status in ('awaiting_payment', 'pending', 'accepted',
-                                            'declined', 'completed', 'cancelled')),
+                          check (status in ('awaiting_acceptance', 'awaiting_payment',
+                                            'pending', 'accepted', 'declined',
+                                            'completed', 'cancelled')),
   review_prompted       boolean not null default false,
+  -- payment (crypto)
+  payment_method        text,
+  crypto_amount         text,
+  pay_coin              text,
+  pay_address           text,
+  pay_index             int,
   created_at            timestamptz not null default now()
 );
-
 create index if not exists bookings_status_idx on bookings (status, payment_status);
 create index if not exists bookings_slot_idx on bookings (slot_start);
+create index if not exists bookings_paystatus_created_idx on bookings (payment_status, created_at);
 
 -- ── Reviews (post-appointment) ───────────────────────────────────────
 create table if not exists reviews (
@@ -63,3 +88,137 @@ create table if not exists reviews (
   comment               text,
   created_at            timestamptz not null default now()
 );
+
+-- ── Inventory (product catalog) ──────────────────────────────────────
+create table if not exists inventory (
+  id                 uuid primary key default gen_random_uuid(),
+  sku                text unique not null,
+  name               text not null,
+  stock_qty          int not null default 0 check (stock_qty >= 0),
+  reserved_qty       int not null default 0,     -- held by pending orders (#39)
+  price_mode         text not null default 'unit_bundle',  -- 'unit_bundle' | 'packs'
+  unit_price_cents   int,
+  bundle_qty         int,
+  bundle_price_cents int,
+  packs              jsonb,
+  active             boolean not null default true,
+  sort               int not null default 0,
+  updated_at         timestamptz not null default now()
+);
+
+-- ── Payment derivation counters (one row per coin) ───────────────────
+create table if not exists pay_counters (
+  coin        text primary key,
+  next_index  int not null default 0
+);
+
+-- ── Builder invites (pre-approved @handles) ──────────────────────────
+create table if not exists builder_invites (
+  username    text primary key,
+  created_at  timestamptz not null default now()
+);
+
+-- ── Wallet ledger (append-only audit trail) ──────────────────────────
+create table if not exists ledger (
+  id            uuid primary key default gen_random_uuid(),
+  telegram_id   bigint not null,
+  delta_cents   integer not null,                 -- +credit / −debit
+  kind          text not null
+                  check (kind in ('deposit', 'purchase', 'refund', 'adjustment')),
+  ref_type      text,                             -- 'order' | 'booking' | 'deposit'
+  ref_id        uuid,
+  balance_after integer not null,
+  created_at    timestamptz not null default now()
+);
+create index if not exists ledger_telegram_created_idx on ledger (telegram_id, created_at desc);
+alter table ledger enable row level security;
+
+-- ── Deposits (watched on-chain top-ups) ──────────────────────────────
+create table if not exists deposits (
+  id             uuid primary key default gen_random_uuid(),
+  telegram_id    bigint not null,
+  pay_coin       text,
+  pay_address    text,
+  pay_index      int,
+  crypto_amount  text,                            -- quoted amount for the QR
+  usd_cents      int,                             -- intended deposit value
+  credited_cents int,                             -- actual value credited on confirm
+  status         text not null default 'pending'
+                   check (status in ('pending', 'credited', 'expired')),
+  pay_expires_at timestamptz,
+  created_at     timestamptz not null default now()
+);
+create index if not exists deposits_status_created_idx on deposits (status, created_at);
+alter table deposits enable row level security;
+
+-- ── Atomic functions ─────────────────────────────────────────────────
+
+-- Allocate the next BIP84 derivation index for a coin (atomic upsert+increment).
+create or replace function next_derivation_index(p_coin text)
+returns integer language plpgsql as $$
+declare v_idx integer;
+begin
+  insert into pay_counters (coin, next_index) values (p_coin, 1)
+  on conflict (coin) do update set next_index = pay_counters.next_index + 1
+  returning next_index - 1 into v_idx;
+  return v_idx;
+end; $$;
+
+-- Decrement stock only if enough remains; returns remaining, or null if insufficient.
+create or replace function decrement_stock(p_sku text, p_qty integer)
+returns integer language plpgsql as $$
+declare v_remaining integer;
+begin
+  update inventory set stock_qty = stock_qty - p_qty, updated_at = now()
+   where sku = p_sku and stock_qty >= p_qty
+  returning stock_qty into v_remaining;
+  return v_remaining;
+end; $$;
+
+-- Reserve against available (stock_qty − reserved_qty); returns available-after, or null.
+create or replace function reserve_stock(p_sku text, p_qty integer)
+returns integer language plpgsql as $$
+declare v_avail integer;
+begin
+  update inventory set reserved_qty = reserved_qty + p_qty, updated_at = now()
+   where sku = p_sku and (stock_qty - reserved_qty) >= p_qty
+  returning (stock_qty - reserved_qty) into v_avail;
+  return v_avail;
+end; $$;
+
+create or replace function release_reservation(p_sku text, p_qty integer)
+returns void language plpgsql as $$
+begin
+  update inventory set reserved_qty = greatest(0, reserved_qty - p_qty), updated_at = now()
+   where sku = p_sku;
+end; $$;
+
+-- Wallet: atomic credit (row-locked), append ledger row, return new balance.
+create or replace function credit_balance(
+  p_telegram_id bigint, p_delta_cents integer, p_kind text, p_ref_type text, p_ref_id uuid
+) returns integer language plpgsql as $$
+declare v_new integer;
+begin
+  update users set balance_cents = balance_cents + p_delta_cents
+   where telegram_id = p_telegram_id
+  returning balance_cents into v_new;
+  if v_new is null then raise exception 'no user row for telegram_id %', p_telegram_id; end if;
+  insert into ledger (telegram_id, delta_cents, kind, ref_type, ref_id, balance_after)
+  values (p_telegram_id, p_delta_cents, p_kind, p_ref_type, p_ref_id, v_new);
+  return v_new;
+end; $$;
+
+-- Wallet: atomic debit only if sufficient; returns new balance or null.
+create or replace function debit_balance(
+  p_telegram_id bigint, p_amount_cents integer, p_ref_type text, p_ref_id uuid
+) returns integer language plpgsql as $$
+declare v_new integer;
+begin
+  update users set balance_cents = balance_cents - p_amount_cents
+   where telegram_id = p_telegram_id and balance_cents >= p_amount_cents
+  returning balance_cents into v_new;
+  if v_new is null then return null; end if;
+  insert into ledger (telegram_id, delta_cents, kind, ref_type, ref_id, balance_after)
+  values (p_telegram_id, -p_amount_cents, 'purchase', p_ref_type, p_ref_id, v_new);
+  return v_new;
+end; $$;

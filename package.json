@@ -1,7 +1,7 @@
 {
   "name": "sfbrickco",
   "version": "1.0.0",
-  "description": "Telegram bot for SF Brick Company: red LEGO brick sales + bookable LEGO-expert setup service, paid via Stripe",
+  "description": "Telegram bot for SF Brick Company: custom 3D-printed building-block accessories + bookable on-site build help, paid in crypto (BTC/LTC)",
   "main": "index.js",
   "type": "module",
   "scripts": {
