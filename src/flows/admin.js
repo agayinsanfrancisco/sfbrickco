@@ -25,7 +25,7 @@ import {
 } from '../supabase.js';
 import { manualSurchargeCents, estimateBetween } from '../uber.js';
 import { adminMenu } from '../lib/keyboards.js';
-import { usd, fmtHourRange, shortRef } from '../lib/format.js';
+import { usd, fmtHourRange, shortRef, orderItemsSummary } from '../lib/format.js';
 import { getIntSetting, getBoolSetting, invalidateSettings } from '../lib/settings.js';
 
 function ensureAdmin(ctx, chatId, telegramId) {
@@ -200,7 +200,7 @@ export async function showOpenOrders(ctx, chatId, telegramId) {
     const total = (o.amount_cents || 0) + (o.delivery_fee_cents || 0);
     await ctx.bot.sendMessage(
       chatId,
-      `📦 *${shortRef(o.id)}* — ${o.qty}× ${o.sku}\n📍 ${o.delivery_address}\n📞 ${o.contact_phone || '—'}` +
+      `📦 *${shortRef(o.id)}* — ${orderItemsSummary(o)}\n📍 ${o.delivery_address}\n📞 ${o.contact_phone || '—'}` +
         `${o.notes ? `\n📝 ${o.notes}` : ''}\n${usd(total)}`,
       {
         parse_mode: 'Markdown',
@@ -257,7 +257,7 @@ export async function doFindOrder(ctx, chatId, text) {
   const canRefund = ['paid', 'dispatched', 'delivered'].includes(o.status);
   await ctx.bot.sendMessage(
     chatId,
-    `🧾 *${shortRef(o.id)}*\n${o.qty}× ${o.sku} · ${usd(total)}\nStatus: *${o.status}*\n` +
+    `🧾 *${shortRef(o.id)}*\n${orderItemsSummary(o)} · ${usd(total)}\nStatus: *${o.status}*\n` +
       `📍 ${o.delivery_address || '—'}\n📞 ${o.contact_phone || '—'}` +
       `${o.notes ? `\n📝 ${o.notes}` : ''}${o.pay_txid ? `\n🔗 \`${o.pay_txid}\`` : ''}`,
     {

@@ -1,6 +1,6 @@
 import { config, isAdminId } from '../config.js';
 import * as crypto from '../crypto.js';
-import { usd, fmtHourRange, shortRef } from '../lib/format.js';
+import { usd, fmtHourRange, shortRef, orderItemsSummary } from '../lib/format.js';
 import { orderTotalCents, discountFor } from '../lib/money.js';
 import {
   getOrder,
@@ -57,9 +57,12 @@ export async function presentOrderMethods(ctx, chatId, order, product) {
   const discountLine = order.discount_cents
     ? `\n• Discount${order.promo_code ? ` (${order.promo_code})` : ''}: −${usd(order.discount_cents)}`
     : '';
+  const header = order.items?.length
+    ? `🧾 *Order ${shortRef(order.id)}*\n${order.items.map((i) => `• ${i.qty}× ${i.name}`).join('\n')}`
+    : `🧾 *${order.qty} × ${product?.name || order.sku}*`;
   await ctx.bot.sendMessage(
     chatId,
-    `🧾 *${order.qty} × ${product?.name || order.sku}*\n` +
+    `${header}\n` +
       `• Items: ${usd(order.amount_cents)}\n` +
       `• Courier delivery: ${usd(order.delivery_fee_cents)}${discountLine}\n` +
       `• *Total: ${usd(total)}*\nChoose how to pay:`,
@@ -131,6 +134,19 @@ export async function presentBookingMethods(ctx, chatId, bookingId) {
     )}\nChoose how to pay:`,
     { parse_mode: 'Markdown', reply_markup: { inline_keyboard: rows } }
   );
+}
+
+// Stock check that understands both single-item and multi-item (cart) orders.
+async function stockOk(order) {
+  if (order.items?.length) {
+    for (const it of order.items) {
+      const p = await getProduct(it.sku);
+      if ((p?.stock_qty ?? 0) < it.qty) return false;
+    }
+    return true;
+  }
+  const p = await getProduct(order.sku);
+  return (p?.stock_qty ?? 0) >= order.qty;
 }
 
 // ── Issuing a payment ────────────────────────────────────────────────
@@ -213,9 +229,8 @@ export async function payOrderCrypto(ctx, chatId, telegramId, coin, orderId, { r
     await ctx.bot.sendMessage(chatId, 'That order is no longer awaiting payment.');
     return;
   }
-  const product = await getProduct(order.sku);
-  if ((product?.stock_qty ?? 0) < order.qty) {
-    await ctx.bot.sendMessage(chatId, '😔 That item is no longer in stock. Please start a new order.');
+  if (!(await stockOk(order))) {
+    await ctx.bot.sendMessage(chatId, '😔 An item is no longer in stock. Please start a new order.');
     return;
   }
   const total = orderTotalCents(order);
@@ -367,9 +382,8 @@ export async function payOrderFromBalance(ctx, chatId, telegramId, orderId) {
     await ctx.bot.sendMessage(chatId, 'That order is no longer awaiting payment.');
     return;
   }
-  const product = await getProduct(order.sku);
-  if ((product?.stock_qty ?? 0) < order.qty) {
-    await ctx.bot.sendMessage(chatId, '😔 That item is no longer in stock. Please start a new order.');
+  if (!(await stockOk(order))) {
+    await ctx.bot.sendMessage(chatId, '😔 An item is no longer in stock. Please start a new order.');
     return;
   }
   const total = orderTotalCents(order);
@@ -421,17 +435,21 @@ export async function confirmOrder(ctx, order, { auto = false } = {}) {
   const paid = await markOrderPaid(order.id);
   if (!paid) return false; // already confirmed
   logEvent(order.telegram_id, 'order_paid', { id: order.id, total: orderTotalCents(order) });
-  const remaining = await decrementStock(order.sku, order.qty);
-  // Out-of-stock: deactivate the product + alert admins (#14).
-  if (remaining && remaining.stock_qty === 0) {
-    await setProductActive(order.sku, false);
-    for (const adminId of config.adminIds) {
-      try {
-        await ctx.bot.sendMessage(adminId, `⚠️ ${order.sku} is now *sold out* and has been hidden from the shop. Restock via the inventory menu.`, {
-          parse_mode: 'Markdown',
-        });
-      } catch {
-        /* ignore */
+  // Decrement stock per line item (cart) or the single SKU; deactivate + alert
+  // admins on any item hitting zero (#14, #17).
+  const lines = order.items?.length ? order.items : [{ sku: order.sku, qty: order.qty, name: order.sku }];
+  for (const line of lines) {
+    const remaining = await decrementStock(line.sku, line.qty);
+    if (remaining && remaining.stock_qty === 0) {
+      await setProductActive(line.sku, false);
+      for (const adminId of config.adminIds) {
+        try {
+          await ctx.bot.sendMessage(adminId, `⚠️ ${line.sku} is now *sold out* and has been hidden from the shop. Restock via the inventory menu.`, {
+            parse_mode: 'Markdown',
+          });
+        } catch {
+          /* ignore */
+        }
       }
     }
   }
@@ -443,13 +461,16 @@ export async function confirmOrder(ctx, order, { auto = false } = {}) {
   } catch {
     /* ignore */
   }
+  const itemSummary = order.items?.length
+    ? order.items.map((i) => `${i.qty}× ${i.name}`).join(', ')
+    : `${order.qty} × ${order.sku}`;
   const detail =
     `📦 *Paid order ${shortRef(order.id)} — ready to dispatch*\n` +
-    `${order.qty} × ${order.sku}\n` +
+    `${itemSummary}\n` +
     `📍 ${order.delivery_address}\n` +
-    `📞 ${order.contact_phone || '—'}${order.contact_handle ? ` (@${order.contact_handle})` : ''}\n` +
-    `Delivery fee ${usd(order.delivery_fee_cents)} · paid ${auto ? 'auto/on-chain' : 'manual'}` +
-    (remaining ? `\nStock now ${remaining.stock_qty}.` : '');
+    `📞 ${order.contact_phone || '—'}${order.contact_handle ? ` (@${order.contact_handle})` : ''}` +
+    `${order.notes ? `\n📝 ${order.notes}` : ''}\n` +
+    `Delivery fee ${usd(order.delivery_fee_cents)} · paid ${auto ? 'auto/on-chain' : 'manual'}`;
   for (const adminId of config.adminIds) {
     try {
       await ctx.bot.sendMessage(adminId, detail, {
@@ -531,7 +552,7 @@ export async function adminDispatch(ctx, chatId, telegramId, orderId) {
 
   await ctx.bot.sendMessage(
     chatId,
-    `🚚 *Dispatching ${shortRef(o.id)} — ${o.qty} × ${o.sku}*\n📍 ${o.delivery_address}\n📞 ${o.contact_phone || '—'}` +
+    `🚚 *Dispatching ${shortRef(o.id)} — ${orderItemsSummary(o)}*\n📍 ${o.delivery_address}\n📞 ${o.contact_phone || '—'}` +
       `${o.notes ? `\n📝 ${o.notes}` : ''}\n\nRequest a courier to this address and it’s on its way.`,
     {
       parse_mode: 'Markdown',

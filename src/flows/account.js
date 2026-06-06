@@ -1,5 +1,5 @@
 import { isAdminId } from '../config.js';
-import { usd, fmtHourRange, shortRef } from '../lib/format.js';
+import { usd, fmtHourRange, shortRef, orderItemsSummary } from '../lib/format.js';
 import { orderTotalCents } from '../lib/money.js';
 import {
   getUserByTelegramId,
@@ -60,7 +60,7 @@ export async function showMyOrders(ctx, chatId, telegramId) {
 
   for (const o of orders) {
     const total = orderTotalCents(o);
-    const text = `🧾 *${shortRef(o.id)}* — ${o.qty}× ${o.sku}\n${ORDER_STATUS[o.status] || o.status} · ${usd(total)}`;
+    const text = `🧾 *${shortRef(o.id)}* — ${orderItemsSummary(o)}\n${ORDER_STATUS[o.status] || o.status} · ${usd(total)}`;
     const reply_markup =
       o.status === 'pending'
         ? {

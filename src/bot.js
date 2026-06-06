@@ -173,6 +173,9 @@ export function createBot() {
       } else if (data === 'shop:qty:custom') await shop.promptCustomQty(ctx, chatId);
       else if (data.startsWith('shop:qty:'))
         await shop.chooseQty(ctx, chatId, Number.parseInt(sliceAfter(data, 'shop:qty:'), 10));
+      else if (data === 'shop:cart') await shop.showCart(ctx, chatId);
+      else if (data === 'shop:checkout') await shop.checkout(ctx, chatId);
+      else if (data === 'shop:clear') await shop.clearCart(ctx, chatId);
       else if (data === 'shop:lastaddr') await shop.useLastAddress(ctx, chatId);
       else if (data === 'shop:noteskip') await shop.skipNote(ctx, chatId, telegramId);
       // Booking

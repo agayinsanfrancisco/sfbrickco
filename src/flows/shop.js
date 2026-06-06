@@ -5,8 +5,16 @@ import { estimateSurcharge } from '../uber.js';
 import { qtyKeyboard } from '../lib/keyboards.js';
 import { usd, shortRef } from '../lib/format.js';
 import { getBoolSetting, getIntSetting } from '../lib/settings.js';
-import { deliveryAfterThreshold } from '../lib/money.js';
+import { deliveryAfterThreshold, cartSubtotalCents } from '../lib/money.js';
 import { presentOrderMethods } from './payments.js';
+
+// Cart lives in the session as `cart: [{ sku, name, qty, line_cents }]`.
+function getCart(ctx, chatId) {
+  return ctx.sessions.get(chatId)?.cart || [];
+}
+function qtyInCart(cart, sku) {
+  return cart.filter((i) => i.sku === sku).reduce((s, i) => s + i.qty, 0);
+}
 
 export async function startShop(ctx, chatId) {
   if (!(await getBoolSetting('flag_shop', true))) {
@@ -20,6 +28,8 @@ export async function startShop(ctx, chatId) {
     return;
   }
   const rows = products.map((p) => [{ text: p.name, callback_data: `shop:p:${p.sku}` }]);
+  const cart = getCart(ctx, chatId);
+  if (cart.length) rows.push([{ text: `🛒 View cart (${cart.length})`, callback_data: 'shop:cart' }]);
   await ctx.bot.sendMessage(chatId, '🧱 *Shop* — pick a product:', {
     parse_mode: 'Markdown',
     reply_markup: { inline_keyboard: rows },
@@ -32,16 +42,18 @@ export async function chooseProduct(ctx, chatId, sku) {
     await ctx.bot.sendMessage(chatId, 'That product isn’t available.');
     return;
   }
+  const s = ctx.sessions.get(chatId) || {};
   if (p.price_mode === 'packs') {
     const rows = packOptions(p).map((pk) => [
       { text: `${pk.qty} for ${usd(pk.cents)}`, callback_data: `shop:pack:${sku}:${pk.qty}` },
     ]);
+    ctx.sessions.set(chatId, { ...s, flow: 'shop', cart: s.cart || [] });
     await ctx.bot.sendMessage(chatId, `*${p.name}*\nChoose a pack:`, {
       parse_mode: 'Markdown',
       reply_markup: { inline_keyboard: rows },
     });
   } else {
-    ctx.sessions.set(chatId, { flow: 'shop', sku });
+    ctx.sessions.set(chatId, { ...s, flow: 'shop', cart: s.cart || [], sku });
     await ctx.bot.sendMessage(
       chatId,
       `*${p.name}*\n• ${usd(p.unit_price_cents)} each\n• ${p.bundle_qty} for ${usd(
@@ -69,45 +81,91 @@ export async function chooseQty(ctx, chatId, qty) {
     await ctx.bot.sendMessage(chatId, 'Please send a whole number greater than 0.');
     return;
   }
-  await beginDelivery(ctx, chatId, s.sku, qty);
+  await addToCart(ctx, chatId, s.sku, qty);
 }
 
 export async function choosePack(ctx, chatId, sku, qty) {
-  await beginDelivery(ctx, chatId, sku, qty);
+  await addToCart(ctx, chatId, sku, qty);
 }
 
-async function beginDelivery(ctx, chatId, sku, qty) {
+async function addToCart(ctx, chatId, sku, qty) {
   const p = await getProduct(sku);
-  if (!p) {
-    await ctx.bot.sendMessage(chatId, 'Product not found.');
+  if (!p || !p.active) {
+    await ctx.bot.sendMessage(chatId, 'That product isn’t available.');
     return;
   }
-  if ((p.stock_qty ?? 0) < qty) {
+  const cart = getCart(ctx, chatId);
+  const already = qtyInCart(cart, sku);
+  if ((p.stock_qty ?? 0) < already + qty) {
     await ctx.bot.sendMessage(
       chatId,
       (p.stock_qty ?? 0) === 0
         ? `😔 ${p.name} is sold out right now.`
-        : `Only ${p.stock_qty} ${p.name} in stock. Try a smaller quantity.`
+        : `Only ${p.stock_qty} ${p.name} in stock${already ? ` (you already have ${already} in your cart)` : ''}.`
     );
     return;
   }
-  if (priceForProduct(p, qty) == null) {
+  const lineCents = priceForProduct(p, qty);
+  if (lineCents == null) {
     await ctx.bot.sendMessage(chatId, 'That quantity isn’t available for this product.');
     return;
   }
-  // Offer the customer's last delivery address (#42). In private chat
-  // chatId === telegramId, so it doubles as the user key for the lookup.
+  cart.push({ sku, name: p.name, qty, line_cents: lineCents });
+  const s = ctx.sessions.get(chatId) || {};
+  ctx.sessions.set(chatId, { flow: 'shop', cart, sku: undefined, step: undefined, ...keepCheckout(s) });
+  await showCart(ctx, chatId);
+}
+
+// Preserve any in-progress checkout fields when we rewrite the session.
+function keepCheckout(s) {
+  const { address, deliveryFee, phone, handle, lastAddr } = s;
+  return { address, deliveryFee, phone, handle, lastAddr };
+}
+
+export async function showCart(ctx, chatId) {
+  const cart = getCart(ctx, chatId);
+  if (!cart.length) {
+    await ctx.bot.sendMessage(chatId, 'Your cart is empty. Tap /shop to add items.');
+    return;
+  }
+  const lines = cart.map((i) => `• ${i.qty}× ${i.name} — ${usd(i.line_cents)}`);
+  await ctx.bot.sendMessage(
+    chatId,
+    `🛒 *Your cart*\n${lines.join('\n')}\n\n*Subtotal: ${usd(cartSubtotalCents(cart))}*`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '➕ Add another', callback_data: 'shop:start' }],
+          [{ text: '✅ Checkout', callback_data: 'shop:checkout' }],
+          [{ text: '🗑️ Clear cart', callback_data: 'shop:clear' }],
+        ],
+      },
+    }
+  );
+}
+
+export async function clearCart(ctx, chatId) {
+  ctx.sessions.delete(chatId);
+  await ctx.bot.sendMessage(chatId, '🗑️ Cart cleared.');
+}
+
+// Checkout the whole cart → collect delivery address.
+export async function checkout(ctx, chatId) {
+  const cart = getCart(ctx, chatId);
+  if (!cart.length) {
+    await ctx.bot.sendMessage(chatId, 'Your cart is empty. Tap /shop to add items.');
+    return;
+  }
   const last = await lastDeliveryAddress(chatId);
-  ctx.sessions.set(chatId, { flow: 'shop', step: 'awaiting_delivery_address', sku, qty, lastAddr: last });
-  // With a saved address, offer the one-tap button; otherwise force_reply with a
-  // format placeholder so the input box guides street / city / ZIP.
+  ctx.sessions.set(chatId, { flow: 'shop', cart, step: 'awaiting_delivery_address', lastAddr: last });
   const reply_markup = last
     ? { inline_keyboard: [[{ text: `📍 Use last: ${last.slice(0, 40)}`, callback_data: 'shop:lastaddr' }]] }
     : { force_reply: true, input_field_placeholder: '123 Main St, San Francisco, CA 94110' };
   await ctx.bot.sendMessage(
     chatId,
     `📍 What’s the *delivery address*? (Street, city, ZIP)\n` +
-      `We courier your ${p.name} by Uber and add the delivery fee at checkout.`,
+      `We courier your order by Uber and add the delivery fee at checkout.`,
     { parse_mode: 'Markdown', reply_markup }
   );
 }
@@ -123,7 +181,7 @@ export async function useLastAddress(ctx, chatId) {
 
 export async function receiveDeliveryAddress(ctx, chatId, _telegramId, address) {
   const s = ctx.sessions.get(chatId);
-  if (!s?.sku) return;
+  if (!s?.cart?.length) return;
   const est = await estimateSurcharge(address);
   if (est.ok && est.tooFar) {
     await ctx.bot.sendMessage(
@@ -149,7 +207,7 @@ export async function receiveDeliveryAddress(ctx, chatId, _telegramId, address) 
 
 export async function receivePhone(ctx, chatId, telegramId, phone, handle) {
   const s = ctx.sessions.get(chatId);
-  if (!s?.sku || s.step !== 'awaiting_phone') return;
+  if (!s?.cart?.length || s.step !== 'awaiting_phone') return;
   ctx.sessions.set(chatId, { ...s, step: 'awaiting_note', phone: phone || null, handle: handle || null });
   await ctx.bot.sendMessage(
     chatId,
@@ -160,30 +218,32 @@ export async function receivePhone(ctx, chatId, telegramId, phone, handle) {
 
 async function finalizeOrder(ctx, chatId, telegramId, note) {
   const s = ctx.sessions.get(chatId);
-  if (!s?.sku || s.step !== 'awaiting_note') return;
+  if (!s?.cart?.length || s.step !== 'awaiting_note') return;
   ctx.sessions.delete(chatId);
-  const p = await getProduct(s.sku);
-  const itemCents = priceForProduct(p, s.qty);
+  const cart = s.cart;
+  const subtotal = cartSubtotalCents(cart);
+  const totalQty = cart.reduce((sum, i) => sum + i.qty, 0);
   // Free-delivery threshold (#45): 0 = disabled.
   const threshold = await getIntSetting('free_delivery_threshold_cents', 0);
-  const deliveryFee = deliveryAfterThreshold(itemCents, s.deliveryFee, threshold);
+  const deliveryFee = deliveryAfterThreshold(subtotal, s.deliveryFee, threshold);
   const order = await createOrder({
     telegramId,
-    sku: s.sku,
-    qty: s.qty,
-    amountCents: itemCents,
+    sku: cart.length === 1 ? cart[0].sku : `cart:${cart.length}`,
+    qty: totalQty,
+    amountCents: subtotal,
     deliveryFeeCents: deliveryFee,
     deliveryAddress: s.address,
     contactPhone: s.phone,
     contactHandle: s.handle,
     notes: note,
+    items: cart,
   });
-  logEvent(telegramId, 'order_created', { sku: s.sku, qty: s.qty, cents: itemCents });
+  logEvent(telegramId, 'order_created', { items: cart.length, qty: totalQty, cents: subtotal });
   await ctx.bot.sendMessage(chatId, `✅ Order *${shortRef(order.id)}* created — thanks!`, {
     parse_mode: 'Markdown',
     reply_markup: { remove_keyboard: true },
   });
-  await presentOrderMethods(ctx, chatId, order, p);
+  await presentOrderMethods(ctx, chatId, order, cart.length === 1 ? await getProduct(cart[0].sku) : null);
 }
 
 export async function receiveNote(ctx, chatId, telegramId, text) {

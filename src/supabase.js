@@ -160,6 +160,7 @@ export async function createOrder({
   contactPhone = null,
   contactHandle = null,
   notes = null,
+  items = null, // multi-item cart line items (#17); null for single-item orders
 }) {
   const { data, error } = await supabase
     .from('orders')
@@ -173,6 +174,7 @@ export async function createOrder({
       contact_phone: contactPhone,
       contact_handle: contactHandle,
       notes,
+      items,
     })
     .select('*')
     .single();
