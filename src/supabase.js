@@ -178,8 +178,12 @@ export async function createOrder({
   return data;
 }
 
-// Attach the chosen coin + derived address + quoted amount at pay time.
-export async function updateOrderCrypto(id, { paymentMethod, cryptoAmount, payCoin, payAddress, payIndex }) {
+// Attach the chosen coin + derived address + quoted amount + locked rate +
+// expiry at pay time.
+export async function updateOrderCrypto(
+  id,
+  { paymentMethod, cryptoAmount, payCoin, payAddress, payIndex, payExpiresAt = null, usdRate = null }
+) {
   const { data } = await supabase
     .from('orders')
     .update({
@@ -188,7 +192,27 @@ export async function updateOrderCrypto(id, { paymentMethod, cryptoAmount, payCo
       pay_coin: payCoin,
       pay_address: payAddress,
       pay_index: payIndex,
+      pay_expires_at: payExpiresAt,
+      usd_rate: usdRate,
     })
+    .eq('id', id)
+    .select('*')
+    .maybeSingle();
+  return data;
+}
+
+// Record the on-chain funding tx for audit (best-effort, set at confirm time).
+export async function recordOrderTx(id, { txid, blockHeight }) {
+  await supabase
+    .from('orders')
+    .update({ pay_txid: txid, pay_block_height: blockHeight })
+    .eq('id', id);
+}
+
+export async function markOrderRefunded(id, txid) {
+  const { data } = await supabase
+    .from('orders')
+    .update({ status: 'refunded', refund_txid: txid, refunded_at: new Date().toISOString() })
     .eq('id', id)
     .select('*')
     .maybeSingle();
@@ -296,7 +320,15 @@ export async function getBooking(id) {
 
 export async function setBookingCrypto(
   id,
-  { paymentMethod, cryptoAmount, payCoin = null, payAddress = null, payIndex = null }
+  {
+    paymentMethod,
+    cryptoAmount,
+    payCoin = null,
+    payAddress = null,
+    payIndex = null,
+    payExpiresAt = null,
+    usdRate = null,
+  }
 ) {
   const { data } = await supabase
     .from('bookings')
@@ -306,7 +338,26 @@ export async function setBookingCrypto(
       pay_coin: payCoin,
       pay_address: payAddress,
       pay_index: payIndex,
+      pay_expires_at: payExpiresAt,
+      usd_rate: usdRate,
     })
+    .eq('id', id)
+    .select('*')
+    .maybeSingle();
+  return data;
+}
+
+export async function recordBookingTx(id, { txid, blockHeight }) {
+  await supabase
+    .from('bookings')
+    .update({ pay_txid: txid, pay_block_height: blockHeight })
+    .eq('id', id);
+}
+
+export async function markBookingRefunded(id, txid) {
+  const { data } = await supabase
+    .from('bookings')
+    .update({ payment_status: 'refunded', refund_txid: txid, refunded_at: new Date().toISOString() })
     .eq('id', id)
     .select('*')
     .maybeSingle();

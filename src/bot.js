@@ -143,7 +143,11 @@ export function createBot() {
         const p = sliceAfter(data, 'pm:').split(':'); // crypto-only (btc/ltc)
         if (p[0] === 'o') await payments.payOrderCrypto(ctx, chatId, telegramId, p[1], p[2]); // p[2]=orderId
         else if (p[0] === 'b') await payments.payBookingCrypto(ctx, chatId, telegramId, p[1], p[2]);
-        else if (p[0] === 'sent') await payments.customerSent(ctx, chatId, p[1], p[2]);
+        else if (p[0] === 're') {
+          // pm:re:<kind>:<coin>:<ref> — re-quote a fresh address/rate
+          if (p[1] === 'o') await payments.payOrderCrypto(ctx, chatId, telegramId, p[2], p[3], { refresh: true });
+          else if (p[1] === 'b') await payments.payBookingCrypto(ctx, chatId, telegramId, p[2], p[3], { refresh: true });
+        } else if (p[0] === 'sent') await payments.customerSent(ctx, chatId, p[1], p[2]);
         else if (p[0] === 'ok') await payments.adminConfirm(ctx, chatId, telegramId, p[1], p[2]);
         else if (p[0] === 'disp') await payments.adminDispatch(ctx, chatId, telegramId, p[1]);
       }

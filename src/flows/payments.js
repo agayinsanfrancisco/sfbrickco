@@ -80,17 +80,36 @@ async function allocateAddress(coin) {
   return { address: crypto.receiveAddress(coin, 0), index: null, auto: false };
 }
 
-async function sendCryptoInstructions(ctx, chatId, { coin, address, amountCents, cryptoAmount, auto, kind, ref }) {
+function isExpired(iso) {
+  return iso ? Date.parse(iso) <= Date.now() : false;
+}
+
+function fmtClock(iso) {
+  return new Date(iso).toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    timeZone: 'America/Los_Angeles',
+    timeZoneName: 'short',
+  });
+}
+
+async function sendCryptoInstructions(
+  ctx,
+  chatId,
+  { coin, address, amountCents, cryptoAmount, auto, expiresAt, kind, ref }
+) {
   const c = crypto.COINS[coin];
   const tail = auto
     ? 'We’ll confirm automatically once it’s on-chain (usually a few minutes).'
     : 'Once sent, tap *“I’ve sent it”* and we’ll confirm shortly.';
+  const expiryNote = expiresAt ? `\n⏳ Rate locked until *${fmtClock(expiresAt)}* — send promptly.` : '';
   const caption =
     `Send exactly *${cryptoAmount} ${c.ticker}* (≈ ${usd(amountCents)}) to:\n\n` +
-    `\`${address}\`\n\n${tail}\nRate locked ~15 min; send promptly.`;
-  const reply_markup = auto
-    ? undefined
-    : { inline_keyboard: [[{ text: '✅ I’ve sent it', callback_data: `pm:sent:${kind}:${ref}` }]] };
+    `\`${address}\`\n\n${tail}${expiryNote}`;
+  const rows = [];
+  if (!auto) rows.push([{ text: '✅ I’ve sent it', callback_data: `pm:sent:${kind}:${ref}` }]);
+  rows.push([{ text: '🔄 Refresh quote', callback_data: `pm:re:${kind}:${coin}:${ref}` }]);
+  const reply_markup = { inline_keyboard: rows };
   try {
     const png = await crypto.qrPng(coin, cryptoAmount, address);
     await ctx.bot.sendPhoto(chatId, png, { caption, parse_mode: 'Markdown', reply_markup });
@@ -122,7 +141,7 @@ async function notifyAdminsToConfirm(ctx, { kind, ref, address, coin, amountCent
   }
 }
 
-export async function payOrderCrypto(ctx, chatId, telegramId, coin, orderId) {
+export async function payOrderCrypto(ctx, chatId, telegramId, coin, orderId, { refresh = false } = {}) {
   if (!crypto.isCoinAvailable(coin)) {
     await ctx.bot.sendMessage(chatId, 'That coin isn’t available right now.');
     return;
@@ -138,86 +157,131 @@ export async function payOrderCrypto(ctx, chatId, telegramId, coin, orderId) {
     return;
   }
   const total = order.amount_cents + order.delivery_fee_cents;
-  let cryptoAmount;
+
+  // Double-tap / re-show guard: if a still-valid address was already issued for
+  // this coin and we're not explicitly refreshing, re-show it instead of
+  // burning a new derivation index.
+  if (!refresh && order.pay_address && order.pay_coin === coin && !isExpired(order.pay_expires_at)) {
+    await sendCryptoInstructions(ctx, chatId, {
+      coin,
+      address: order.pay_address,
+      amountCents: total,
+      cryptoAmount: order.crypto_amount,
+      auto: crypto.hasXpub(coin),
+      expiresAt: order.pay_expires_at,
+      kind: 'o',
+      ref: orderId,
+    });
+    return;
+  }
+
+  let amount, rate;
   try {
-    cryptoAmount = await crypto.quote(coin, total);
+    ({ amount, rate } = await crypto.quoteWithRate(coin, total));
   } catch {
     await ctx.bot.sendMessage(chatId, '⚠️ Couldn’t fetch the exchange rate. Please try again shortly.');
     return;
   }
   const { address, index, auto } = await allocateAddress(coin);
+  const payExpiresAt = new Date(Date.now() + config.crypto.quoteTtlMs).toISOString();
   await updateOrderCrypto(orderId, {
     paymentMethod: coin,
-    cryptoAmount,
+    cryptoAmount: amount,
     payCoin: coin,
     payAddress: auto ? address : null,
     payIndex: index,
+    payExpiresAt,
+    usdRate: rate,
   });
   await sendCryptoInstructions(ctx, chatId, {
     coin,
     address,
     amountCents: total,
-    cryptoAmount,
+    cryptoAmount: amount,
     auto,
+    expiresAt: payExpiresAt,
     kind: 'o',
     ref: orderId,
   });
-  await notifyAdminsToConfirm(ctx, {
-    kind: 'o',
-    ref: orderId,
-    address,
-    coin,
-    amountCents: total,
-    cryptoAmount,
-    detail: `Order: ${order.qty} × ${product?.name || order.sku} → ${order.delivery_address}`,
-    auto,
-  });
+  if (!refresh) {
+    await notifyAdminsToConfirm(ctx, {
+      kind: 'o',
+      ref: orderId,
+      address,
+      coin,
+      amountCents: total,
+      cryptoAmount: amount,
+      detail: `Order: ${order.qty} × ${product?.name || order.sku} → ${order.delivery_address}`,
+      auto,
+    });
+  }
 }
 
-export async function payBookingCrypto(ctx, chatId, telegramId, coin, bookingId) {
+export async function payBookingCrypto(ctx, chatId, telegramId, coin, bookingId, { refresh = false } = {}) {
   if (!crypto.isCoinAvailable(coin)) {
     await ctx.bot.sendMessage(chatId, 'That coin isn’t available right now.');
     return;
   }
   const booking = await getBooking(bookingId);
-  if (!booking || booking.surcharge_source === 'pending') {
+  if (!booking || booking.surcharge_source === 'pending' || booking.payment_status !== 'unpaid') {
     await ctx.bot.sendMessage(chatId, 'That booking isn’t ready for payment yet.');
     return;
   }
-  let cryptoAmount;
+
+  if (!refresh && booking.pay_address && booking.pay_coin === coin && !isExpired(booking.pay_expires_at)) {
+    await sendCryptoInstructions(ctx, chatId, {
+      coin,
+      address: booking.pay_address,
+      amountCents: booking.total_cents,
+      cryptoAmount: booking.crypto_amount,
+      auto: crypto.hasXpub(coin),
+      expiresAt: booking.pay_expires_at,
+      kind: 'b',
+      ref: bookingId,
+    });
+    return;
+  }
+
+  let amount, rate;
   try {
-    cryptoAmount = await crypto.quote(coin, booking.total_cents);
+    ({ amount, rate } = await crypto.quoteWithRate(coin, booking.total_cents));
   } catch {
     await ctx.bot.sendMessage(chatId, '⚠️ Couldn’t fetch the exchange rate. Please try again shortly.');
     return;
   }
   const { address, index, auto } = await allocateAddress(coin);
+  const payExpiresAt = new Date(Date.now() + config.crypto.quoteTtlMs).toISOString();
   await setBookingCrypto(bookingId, {
     paymentMethod: coin,
-    cryptoAmount,
+    cryptoAmount: amount,
     payCoin: coin,
     payAddress: auto ? address : null,
     payIndex: index,
+    payExpiresAt,
+    usdRate: rate,
   });
   await sendCryptoInstructions(ctx, chatId, {
     coin,
     address,
     amountCents: booking.total_cents,
-    cryptoAmount,
+    cryptoAmount: amount,
     auto,
+    expiresAt: payExpiresAt,
     kind: 'b',
     ref: bookingId,
   });
-  await notifyAdminsToConfirm(ctx, {
-    kind: 'b',
-    ref: bookingId,
-    address,
-    coin,
-    amountCents: booking.total_cents,
-    cryptoAmount,
-    detail: `Booking: ${fmtHourRange(booking.slot_start, booking.slot_end)} @ ${booking.customer_address}`,
-    auto,
-  });
+  if (!refresh) {
+    await notifyAdminsToConfirm(ctx, {
+      kind: 'b',
+      ref: bookingId,
+      address,
+      coin,
+      amountCents: booking.total_cents,
+      cryptoAmount: amount,
+      detail: `Booking: ${fmtHourRange(booking.slot_start, booking.slot_end)} @ ${booking.customer_address}`,
+      auto,
+    });
+  }
 }
 
 export async function customerSent(ctx, chatId, kind, ref) {

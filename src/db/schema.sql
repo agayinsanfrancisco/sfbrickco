@@ -30,14 +30,20 @@ create table if not exists orders (
   contact_phone      text,
   contact_handle     text,
   status             text not null default 'pending'
-                       check (status in ('pending', 'paid', 'accepted',
-                                         'dispatched', 'delivered', 'cancelled')),
+                       check (status in ('pending', 'paid', 'accepted', 'dispatched',
+                                         'delivered', 'cancelled', 'refunded')),
   -- payment (crypto)
   payment_method     text,
   crypto_amount      text,
   pay_coin           text,
   pay_address        text,
   pay_index          int,
+  pay_expires_at     timestamptz,                -- quote/address validity (#2)
+  usd_rate           numeric,                    -- locked USD/coin rate at quote time (#16)
+  pay_txid           text,                       -- on-chain funding tx (#8)
+  pay_block_height   int,
+  refund_txid        text,                       -- refund record (#37)
+  refunded_at        timestamptz,
   idempotency_key    text,                       -- dedupe double-submits (#48)
   created_at         timestamptz not null default now()
 );
@@ -60,7 +66,7 @@ create table if not exists bookings (
   distance_miles        numeric,
   total_cents           int not null,
   payment_status        text not null default 'unpaid'
-                          check (payment_status in ('unpaid', 'paid')),
+                          check (payment_status in ('unpaid', 'paid', 'refunded')),
   status                text not null default 'awaiting_payment'
                           check (status in ('awaiting_acceptance', 'awaiting_payment',
                                             'pending', 'accepted', 'declined',
@@ -72,6 +78,12 @@ create table if not exists bookings (
   pay_coin              text,
   pay_address           text,
   pay_index             int,
+  pay_expires_at        timestamptz,
+  usd_rate              numeric,
+  pay_txid              text,
+  pay_block_height      int,
+  refund_txid           text,
+  refunded_at           timestamptz,
   created_at            timestamptz not null default now()
 );
 create index if not exists bookings_status_idx on bookings (status, payment_status);
@@ -143,6 +155,9 @@ create table if not exists deposits (
   crypto_amount  text,                            -- quoted amount for the QR
   usd_cents      int,                             -- intended deposit value
   credited_cents int,                             -- actual value credited on confirm
+  usd_rate       numeric,
+  pay_txid       text,
+  pay_block_height int,
   status         text not null default 'pending'
                    check (status in ('pending', 'credited', 'expired')),
   pay_expires_at timestamptz,

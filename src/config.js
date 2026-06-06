@@ -38,6 +38,13 @@ export const config = {
     // Fallback: a single static address (manual admin confirmation).
     btcAddress: process.env.BTC_ADDRESS || '',
     ltcAddress: process.env.LTC_ADDRESS || '',
+    // How long a quoted rate + address stays valid (minutes → ms).
+    quoteTtlMs: int('QUOTE_TTL_MINUTES', 15) * 60 * 1000,
+    // Accept a payment that lands within this fraction of the quote (covers
+    // wallet fee rounding / minor rate drift). 0.995 = accept ≥ 99.5%.
+    fundedTolerance: Number.parseFloat(process.env.PAYMENT_TOLERANCE || '0.995'),
+    // Timeout for external HTTP (price feed + block explorers), ms.
+    httpTimeoutMs: int('CRYPTO_HTTP_TIMEOUT_MS', 8000),
     get enabled() {
       return Boolean(this.btcXpub || this.ltcXpub || this.btcAddress || this.ltcAddress);
     },
