@@ -6,7 +6,7 @@
     <title>SF Brick Company — custom 3D-printed brick accessories &amp; on-site build help</title>
     <meta
       name="description"
-      content="SF Brick Company designs custom 3D-printed accessories, helmets, weapons and structural parts compatible with leading building-block brands — plus on-site build help in San Francisco. Pay in crypto."
+      content="Custom 3D-printed performance enhancers for your brick builds — helmets, weapons, and structural parts for when your setup needs to get harder, stand taller, and last longer. Sci-fi, historical, and fantasy upgrades, printed to spec and couriered in San Francisco. Order on Telegram, pay in crypto."
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -35,7 +35,6 @@
         font-family: "IBM Plex Sans", sans-serif;
         font-size: 17px;
         line-height: 1.6;
-        /* LEGO-stud dot grid + warm vignette */
         background-image:
           radial-gradient(circle at center, rgba(23, 19, 14, 0.05) 1.4px, transparent 1.6px);
         background-size: 26px 26px;
@@ -97,7 +96,7 @@
       .sec-head h2 { font-size: clamp(28px, 4.5vw, 40px); }
       .sec-head p { color: var(--muted); margin: 0; max-width: 460px; }
 
-      /* ── Catalog cards (spec sheets) ── */
+      /* ── Purchase cards ── */
       .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; }
       .card {
         background: var(--paper-2); border: 1px solid var(--line); border-radius: var(--r);
@@ -106,49 +105,43 @@
       .card::before { content: ""; position: absolute; inset: 0 0 auto 0; height: 5px; background: var(--accent, var(--red)); }
       .card.red { --accent: var(--red); }
       .card.blue { --accent: var(--blue); }
+      .card.ink { --accent: var(--ink); }
+      /* whole-card link */
+      .card.link { display: block; text-decoration: none; color: inherit; transition: transform .12s ease, box-shadow .12s ease; }
+      .card.link:hover { transform: translate(-3px, -3px); box-shadow: 7px 7px 0 var(--accent, var(--red)); }
       .card .sku { font-family: "IBM Plex Mono", monospace; font-size: 12px; letter-spacing: 0.12em; color: var(--muted); }
-      .card h3 { font-size: 27px; margin: 6px 0 16px; }
-      .pricerow { display: flex; align-items: baseline; gap: 10px; padding: 10px 0; border-top: 1px dashed var(--line); }
+      .card h3 { font-size: 27px; margin: 6px 0 14px; }
+      .card .desc { color: #3b362d; margin: 0 0 18px; }
+      .pricerow { display: flex; align-items: baseline; gap: 10px; padding: 9px 0; border-top: 1px dashed var(--line); }
       .pricerow:first-of-type { border-top: none; }
       .pricerow .q { font-family: "IBM Plex Mono", monospace; font-size: 13px; color: var(--muted); flex: 1; }
       .pricerow .p { font-family: "Bricolage Grotesque"; font-weight: 800; font-size: 22px; color: var(--accent, var(--ink)); }
+      .card .go { display: inline-flex; align-items: center; gap: 8px; margin-top: 20px; font-weight: 600; font-size: 15px; color: var(--ink); }
+      .card .go::after { content: "→"; color: var(--accent, var(--red)); transition: transform .12s ease; }
+      .card.link:hover .go::after { transform: translateX(4px); }
       .swatch { width: 40px; height: 40px; border-radius: 8px; background: var(--accent); position: absolute; top: 22px; right: 22px; box-shadow: inset 0 0 0 6px rgba(255,255,255,.18); }
 
-      /* ── Steps ── */
-      .steps { display: grid; gap: 2px; counter-reset: s; border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
-      .steps li { list-style: none; display: flex; gap: 18px; padding: 22px 24px; background: var(--paper-2); align-items: flex-start; }
-      .steps li::before {
-        counter-increment: s; content: counter(s, decimal-leading-zero);
-        font-family: "IBM Plex Mono", monospace; font-weight: 600; color: var(--red); font-size: 14px; padding-top: 3px; min-width: 28px;
-      }
-      .steps li b { font-family: "Bricolage Grotesque"; font-weight: 700; }
-      ol { padding: 0; margin: 0; }
+      /* ── FAQ + Support (two column) ── */
+      .faqgrid { display: grid; grid-template-columns: 1fr 320px; gap: 40px; align-items: start; }
+      @media (max-width: 820px) { .faqgrid { grid-template-columns: 1fr; gap: 30px; } }
+      .faq .qa { border-top: 1px solid var(--line); padding: 18px 0; }
+      .faq .qa:first-child { border-top: none; padding-top: 0; }
+      .faq h3 { font-size: 19px; margin: 0 0 6px; }
+      .faq p { margin: 0; color: var(--muted); }
+      .faq a { color: var(--red); }
 
-      /* ── Pay chips ── */
-      .chips { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 8px; }
-      .chip { display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border: 1px solid var(--line); border-radius: 999px; background: var(--paper-2); font-weight: 600; font-size: 15px; }
-      .chip .d { width: 12px; height: 12px; border-radius: 3px; }
+      /* ── Support / contact card ── */
+      .contact-card { background: var(--ink); color: var(--paper); border-radius: var(--r); padding: 28px; display: grid; gap: 14px; position: sticky; top: 84px; }
+      .contact-card h3 { color: var(--paper); font-size: 22px; }
+      .contact-card .row { display: grid; gap: 2px; font-size: 15px; }
+      .contact-card .k { font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: .1em; text-transform: uppercase; color: #b7a98c; }
+      .contact-card a { color: #f3b8b0; text-decoration: none; font-weight: 600; }
+      .contact-card a:hover { text-decoration: underline; }
+      .contact-card .sub { color: #c9bda4; font-size: 13px; }
 
-      /* ── Policies ── */
-      .policy { display: grid; grid-template-columns: 200px 1fr; gap: 14px 36px; }
-      .policy .ph { font-family: "Bricolage Grotesque"; font-weight: 700; font-size: 18px; position: relative; padding-left: 18px; }
-      .policy .ph::before { content: ""; position: absolute; left: 0; top: 7px; width: 8px; height: 8px; border-radius: 2px; background: var(--red); }
-      .policy .pb { color: #3b362d; }
-      .policy .pb ul { margin: 0; padding-left: 18px; }
-      .policy .pb li { margin: 6px 0; }
-      .policy + .policy { margin-top: 26px; }
-      @media (max-width: 720px) { .policy { grid-template-columns: 1fr; gap: 6px; } .policy + .policy { margin-top: 30px; } }
-
-      /* ── Contact ── */
-      .contact-card { background: var(--ink); color: var(--paper); border-radius: var(--r); padding: 30px; display: grid; gap: 10px; }
-      .contact-card .row { display: flex; gap: 12px; font-size: 15px; }
-      .contact-card .k { font-family: "IBM Plex Mono", monospace; font-size: 12px; letter-spacing: .1em; text-transform: uppercase; color: #b7a98c; min-width: 96px; padding-top: 2px; }
-      .contact-card a { color: #f3b8b0; }
-      .repl { color: #e7c14a; }
-      .note { margin-top: 16px; font-size: 13px; color: var(--muted); font-family: "IBM Plex Mono", monospace; background: var(--paper-2); border: 1px dashed var(--line); border-radius: 10px; padding: 12px 14px; }
-
-      footer { padding: 40px 0 70px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; font-family: "IBM Plex Mono", monospace; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
-      .fine { font-size: 12px; color: var(--muted); margin-top: 14px; }
+      footer { padding: 40px 0 70px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; font-family: "IBM Plex Mono", monospace; }
+      footer .frow { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+      .fine { font-size: 12px; color: var(--muted); margin-top: 18px; max-width: 720px; line-height: 1.5; }
     </style>
   </head>
   <body>
@@ -156,31 +149,31 @@
       <div class="nav-in">
         <div class="brand"><span class="stud"></span>SF Brick Company</div>
         <div class="nav-links">
-          <a href="#catalog">Catalog</a>
-          <a href="#build">Build help</a>
-          <a href="#pay">Payment</a>
-          <a href="#policies">Policies</a>
-          <a href="#contact">Contact</a>
+          <a href="#purchase">Make a purchase</a>
+          <a href="#faq">FAQ</a>
+          <a href="#support">Support</a>
         </div>
       </div>
     </nav>
 
+    <!-- ══ HERO ══ -->
     <header class="hero">
       <div class="wrap">
         <div class="tag reveal">San Francisco · additive manufacturing studio</div>
         <h1 class="reveal">The bricks the<br />box <em>forgot.</em></h1>
         <p class="lede reveal">
-          Custom, 3D-printed accessories — helmets, weapons, and structural parts compatible
-          with leading building-block brands. Sci-fi, historical, and fantasy upgrades, printed
-          to spec and couriered to your build table.
+          Custom 3D-printed &ldquo;performance enhancers&rdquo; for your brick builds: helmets,
+          weapons, and structural parts for when your setup needs to get harder, stand taller, and
+          last longer. Sci-fi, historical, and fantasy upgrades printed to spec and couriered
+          straight to your build table.
         </p>
         <div class="hero-cta reveal">
           <a class="btn" href="https://t.me/redbluebrick_bot">Order on Telegram →</a>
-          <a class="btn ghost" href="#build">Hire an Administrator</a>
+          <a class="btn ghost" href="#purchase">See what's available</a>
         </div>
         <div class="hero-strip">
-          <div><b>2</b>parts in the catalog</div>
-          <div><b>1&nbsp;hr</b>on-site build sessions</div>
+          <div><b>3D</b>printed to spec</div>
+          <div><b>1&nbsp;hr</b>on-site sessions</div>
           <div><b>₿ · Ł</b>crypto, 0% fees</div>
           <div><b>24&nbsp;hr</b>booking window</div>
         </div>
@@ -188,127 +181,119 @@
     </header>
 
     <main class="wrap">
-      <!-- CATALOG -->
-      <section id="catalog">
+      <!-- ══ MAKE A PURCHASE ══ -->
+      <section id="purchase">
         <div class="sec-head">
-          <span class="tag">01 / Catalog</span>
-          <h2>Parts &amp; pricing</h2>
-          <p>Premium printed bricks, couriered within San Francisco. Delivery fee shown at checkout.</p>
+          <span class="tag">01 / Make a purchase</span>
+          <h2>Pick one — it opens the bot</h2>
+          <p>Tap a card to start in Telegram. Browse and pay right inside the chat.</p>
         </div>
         <div class="cards">
-          <div class="card red">
+          <a class="card link red" href="https://t.me/redbluebrick_bot?start=shop">
             <span class="swatch"></span>
-            <div class="sku">SKU · RED-BRICK-120</div>
+            <div class="sku">01 · SKU RED-BRICK-120</div>
             <h3>Red Brick #120</h3>
+            <p class="desc">Premium 3D-printed red bricks, couriered within San Francisco.</p>
             <div class="pricerow"><span class="q">Single</span><span class="p">$10</span></div>
             <div class="pricerow"><span class="q">Pack of 6</span><span class="p">$45</span></div>
-          </div>
-          <div class="card blue">
+            <span class="go">Shop on Telegram</span>
+          </a>
+          <a class="card link blue" href="https://t.me/redbluebrick_bot?start=shop">
             <span class="swatch"></span>
-            <div class="sku">SKU · BLUE-BRICK-25</div>
+            <div class="sku">02 · SKU BLUE-BRICK-25</div>
             <h3>Blue Brick #25</h3>
+            <p class="desc">Premium 3D-printed blue bricks, couriered within San Francisco.</p>
             <div class="pricerow"><span class="q">Pack of 4</span><span class="p">$8</span></div>
             <div class="pricerow"><span class="q">Pack of 10</span><span class="p">$15</span></div>
+            <span class="go">Shop on Telegram</span>
+          </a>
+          <a class="card link ink" href="https://t.me/redbluebrick_bot?start=book">
+            <span class="swatch"></span>
+            <div class="sku">03 · ON-SITE BUILD HELP</div>
+            <h3>Book an Administrator</h3>
+            <p class="desc">A vetted local builder comes to you for a one-hour, on-site building session. No purchase required.</p>
+            <div class="pricerow"><span class="q">One-hour session</span><span class="p">$40</span></div>
+            <div class="pricerow"><span class="q">Travel</span><span class="p">est.</span></div>
+            <span class="go">Book on Telegram</span>
+          </a>
+        </div>
+      </section>
+
+      <!-- ══ FAQ + SUPPORT ══ -->
+      <section id="faq">
+        <div class="sec-head">
+          <span class="tag">02 / FAQ &amp; support</span>
+          <h2>Questions &amp; help</h2>
+          <p>The essentials — and how to reach a human if you need one.</p>
+        </div>
+        <div class="faqgrid">
+          <div class="faq">
+            <div class="qa">
+              <h3>How do I order or book?</h3>
+              <p>Everything happens in our Telegram bot. Tap a card above, or message
+                <a href="https://t.me/redbluebrick_bot">@redbluebrick_bot</a> — browse parts or
+                book an on-site session, and you'll get an exact price right in the chat.</p>
+            </div>
+            <div class="qa">
+              <h3>How do I pay?</h3>
+              <p>Bitcoin or Litecoin, on-chain, confirmed automatically — no cards, no processor,
+                no fees from us. You can also top up a wallet balance in the bot and pay from it.</p>
+            </div>
+            <div class="qa">
+              <h3>Can I pay another way?</h3>
+              <p>Yes — message <a href="https://t.me/redbluebrick">support (@redbluebrick)</a> and
+                we'll arrange it. We don't accept credit cards at this time, to protect ourselves
+                and our customers.</p>
+            </div>
+            <div class="qa">
+              <h3>What's an Administrator?</h3>
+              <p>A vetted local builder who comes to you for a one-hour, on-site building session —
+                a flat $40 plus transparent travel. You can hire one without buying any bricks.</p>
+            </div>
+            <div class="qa">
+              <h3>Refunds &amp; cancellations?</h3>
+              <p>Unused parts are refundable within 14 days. Cancel a session at least 2 hours ahead
+                for a full refund — and you're only charged <em>after</em> an Administrator accepts,
+                so an unaccepted request is never billed.</p>
+            </div>
+            <div class="qa">
+              <h3>Where do you deliver?</h3>
+              <p>Within San Francisco; the delivery fee is shown at checkout. Sessions are fulfilled
+                in person at the address you provide, during the slot you select.</p>
+            </div>
           </div>
-        </div>
-      </section>
 
-      <!-- BUILD HELP -->
-      <section id="build">
-        <div class="sec-head">
-          <span class="tag">02 / Service</span>
-          <h2>Hire an Administrator</h2>
-          <p>A flat <strong>$40</strong> for a one-hour, on-site building session, plus transparent travel.</p>
-        </div>
-        <ol class="steps">
-          <li><span><b>Pick a slot.</b> One-hour sessions, bookable within the next 24 hours.</span></li>
-          <li><span><b>Give your address.</b> Your request goes out to our Administrators — no charge yet.</span></li>
-          <li><span><b>An Administrator accepts.</b> Travel is priced from that Administrator's location to you (a live rideshare estimate) and added to the $40 fee.</span></li>
-          <li><span><b>Pay &amp; build.</b> You get a payment link, pay in crypto, and your Administrator arrives at the slot. Afterward, you're invited to leave a review.</span></li>
-        </ol>
-      </section>
-
-      <!-- PAYMENT -->
-      <section id="pay">
-        <div class="sec-head">
-          <span class="tag">03 / Payment</span>
-          <h2>Pay in crypto</h2>
-          <p>Self-custodial, on-chain, confirmed automatically. No cards, no processor, no fees from us.</p>
-        </div>
-        <div class="chips">
-          <span class="chip"><span class="d" style="background:var(--red)"></span>Bitcoin (BTC)</span>
-          <span class="chip"><span class="d" style="background:var(--blue)"></span>Litecoin (LTC)</span>
-        </div>
-        <p style="color:var(--muted); margin-top:18px; max-width:620px;">
-          At checkout you're shown an exact amount and a one-time address (with a QR). Once your
-          payment lands on-chain, your order or booking confirms itself — usually within minutes.
-        </p>
-        <p style="color:var(--muted); margin-top:14px; max-width:620px;">
-          Prefer to pay another way? <a href="https://t.me/redbluebrick">Message support on Telegram (@redbluebrick)</a>
-          and we'll arrange it. We do not accept credit cards at this time, to protect ourselves and our customers.
-        </p>
-      </section>
-
-      <!-- POLICIES -->
-      <section id="policies">
-        <div class="sec-head">
-          <span class="tag">04 / The fine print</span>
-          <h2>Policies</h2>
-          <p>Please read before purchasing. These govern all orders and bookings.</p>
-        </div>
-
-        <div class="policy">
-          <div class="ph">Refunds &amp; cancellations</div>
-          <div class="pb">
-            <ul>
-              <li><strong>Parts:</strong> unused parts may be refunded within 14 days of delivery — contact us to arrange a return.</li>
-              <li><strong>Build sessions:</strong> cancel at least 2 hours before your slot for a full refund. Inside 2 hours, the travel portion is non-refundable if your Administrator is already en route.</li>
-              <li><strong>No Administrator available:</strong> you only pay <em>after</em> an Administrator accepts, so an unaccepted request is never charged.</li>
-              <li>Refunds are sent on-chain to an address you provide; network (miner) fees may be deducted.</li>
-            </ul>
-          </div>
-        </div>
-
-        <div class="policy">
-          <div class="ph">Fulfillment</div>
-          <div class="pb">Parts are couriered within San Francisco; the delivery fee is shown at checkout. Build sessions are fulfilled in person at the address you provide, during the one-hour slot you select.</div>
-        </div>
-
-        <div class="policy">
-          <div class="ph">Privacy</div>
-          <div class="pb">We collect only what's needed to fulfill your order: your Telegram handle, name, the delivery/service address you give us, a phone number for the courier, and your order history. Payments are made directly on-chain — we never see or store card details. We don't sell your data. To request deletion, contact us below.</div>
-        </div>
-
-        <div class="policy">
-          <div class="ph">Terms of service</div>
-          <div class="pb">By placing an order or booking you agree to pay the listed price plus any disclosed travel fee. Products and services are provided as-is for lawful, personal use. Prices and availability may change. These terms are governed by the laws of the State of California.</div>
-        </div>
-
-        <p class="fine">
-          LEGO® is a trademark of the LEGO Group, which does not sponsor, authorize, or endorse
-          SF Brick Company. Our parts are independent, third-party accessories designed to be
-          compatible with common building-block systems.
-        </p>
-      </section>
-
-      <!-- CONTACT -->
-      <section id="contact">
-        <div class="sec-head">
-          <span class="tag">05 / Contact</span>
-          <h2>Customer service</h2>
-          <p>We respond within one business day.</p>
-        </div>
-        <div class="contact-card">
-          <div class="row"><span class="k">Business</span><span>SF Brick Company</span></div>
-          <div class="row"><span class="k">Telegram</span><a href="https://t.me/redbluebrick_bot">@redbluebrick_bot</a></div>
-          <div class="row"><span class="k">Orders</span><a href="https://t.me/redbluebrick_bot">Message the bot to order or book →</a></div>
+          <aside id="support" class="contact-card">
+            <h3>Support</h3>
+            <div class="row">
+              <span class="k">Order / Book</span>
+              <a href="https://t.me/redbluebrick_bot">@redbluebrick_bot</a>
+              <span class="sub">The bot — shop, book, and pay.</span>
+            </div>
+            <div class="row">
+              <span class="k">Talk to a human</span>
+              <a href="https://t.me/redbluebrick">@redbluebrick</a>
+              <span class="sub">Questions, custom requests, or another payment method. We reply within one business day.</span>
+            </div>
+            <div class="row">
+              <span class="k">Business</span>
+              <span>SF Brick Company · San Francisco, CA</span>
+            </div>
+          </aside>
         </div>
       </section>
     </main>
 
     <footer class="wrap">
-      <span>© <span id="yr">2026</span> SF Brick Company · San Francisco, CA</span>
-      <span><a href="#policies" style="text-decoration:none">Refunds</a> · <a href="#policies" style="text-decoration:none">Privacy</a> · <a href="#policies" style="text-decoration:none">Terms</a></span>
+      <div class="frow">
+        <span>© <span id="yr">2026</span> SF Brick Company · San Francisco, CA</span>
+        <span><a href="#purchase" style="text-decoration:none">Purchase</a> · <a href="#faq" style="text-decoration:none">FAQ</a> · <a href="#support" style="text-decoration:none">Support</a></span>
+      </div>
+      <p class="fine">
+        LEGO® is a trademark of the LEGO Group, which does not sponsor, authorize, or endorse
+        SF Brick Company. Our parts are independent, third-party accessories designed to be
+        compatible with common building-block systems.
+      </p>
     </footer>
     <script>document.getElementById('yr').textContent = new Date().getFullYear();</script>
   </body>

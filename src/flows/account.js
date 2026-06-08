@@ -28,7 +28,7 @@ export async function showHelp(ctx, chatId, telegramId) {
     '/help — show this message',
   ];
   if (user?.role === 'expert' || user?.role === 'admin') lines.push('/builder — Administrator portal');
-  if (isAdminId(telegramId)) lines.push('/admin — admin panel');
+  if (isAdminId(telegramId)) lines.push('/owner — owner panel');
   await ctx.bot.sendMessage(chatId, lines.join('\n'), { parse_mode: 'Markdown' });
 }
 

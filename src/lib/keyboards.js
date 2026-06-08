@@ -14,7 +14,7 @@ export function mainMenu({ isExpert, isAdmin } = {}) {
     rows.push([{ text: '📋 My jobs (Administrator)', callback_data: 'exp:list' }]);
     rows.push([{ text: '📍 Update my address', callback_data: 'exp:addr' }]);
   }
-  if (isAdmin) rows.push([{ text: '⚙️ Admin panel', callback_data: 'adm:menu' }]);
+  if (isAdmin) rows.push([{ text: '⚙️ Owner panel', callback_data: 'adm:menu' }]);
   return { reply_markup: { inline_keyboard: rows } };
 }
 

@@ -206,12 +206,21 @@ export async function accept(ctx, chatId, telegramId, bookingId) {
     await ctx.bot.sendMessage(chatId, 'That job is no longer open.');
     return;
   }
-  const est = await estimateBetween(user.address, booking.customer_address);
-  const surcharge = est.ok ? est.surchargeCents : config.uber.flatFallbackCents;
+  // If the customer is booking the ride themselves, there's no travel surcharge.
+  let surcharge, source;
+  if (booking.customer_books_ride) {
+    surcharge = 0;
+    source = 'customer_ride';
+  } else {
+    const est = await estimateBetween(user.address, booking.customer_address);
+    surcharge = est.ok ? est.surchargeCents : config.uber.flatFallbackCents;
+    source = 'estimate';
+  }
   const total = booking.service_fee_cents + surcharge;
   const accepted = await acceptOpenBooking(bookingId, user.id, {
     surchargeCents: surcharge,
     totalCents: total,
+    source,
   });
   if (!accepted) {
     await ctx.bot.sendMessage(chatId, 'Too late — another Administrator grabbed that one.');

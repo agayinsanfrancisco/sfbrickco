@@ -499,14 +499,14 @@ export async function listOpenBookings() {
 // A builder accepts an open job: assign them, set the travel surcharge priced
 // from THEIR address, and move it to awaiting_payment. Conditional on still
 // being open so two builders can't both win it.
-export async function acceptOpenBooking(bookingId, expertId, { surchargeCents, totalCents }) {
+export async function acceptOpenBooking(bookingId, expertId, { surchargeCents, totalCents, source = 'estimate' }) {
   const { data, error } = await supabase
     .from('bookings')
     .update({
       status: 'awaiting_payment',
       expert_id: expertId,
       surcharge_cents: surchargeCents,
-      surcharge_source: 'estimate',
+      surcharge_source: source,
       total_cents: totalCents,
     })
     .eq('id', bookingId)

@@ -18,11 +18,13 @@ export async function startBooking(ctx, chatId) {
     return;
   }
   const days = upcomingDays(7);
+  const fee = await serviceFeeCents();
   await ctx.bot.sendMessage(
     chatId,
-    `🛠️ *Book on-site build help*\n\n` +
-      `Base fee ${usd(await serviceFeeCents())} for a 1-hour on-site session, ` +
-      `plus a travel surcharge (Uber from the Administrator to you).\n\nPick a day:`,
+    `🛠️ *Book an Administrator*\n\n` +
+      `One-time *${usd(fee)}* fee for a 1-hour on-site session, plus a one-way travel ` +
+      `surcharge (Uber, ~${usd(config.uber.flatFallbackCents)}). Or book the Administrator's ` +
+      `ride yourself and pay just *${usd(fee)}*.\n\nPick a day:`,
     { parse_mode: 'Markdown', ...daysKeyboard(days) }
   );
 }
@@ -52,48 +54,52 @@ export async function pickHour(ctx, chatId, startIso) {
     );
     return;
   }
-  ctx.sessions.set(chatId, {
-    flow: 'book',
-    step: 'awaiting_address',
-    data: { startIso, endIso },
+  ctx.sessions.set(chatId, { flow: 'book', step: 'awaiting_street', data: { startIso, endIso } });
+  await ctx.bot.sendMessage(chatId, 'Great. What’s your *street address*?', {
+    parse_mode: 'Markdown',
+    reply_markup: { force_reply: true, input_field_placeholder: '123 Main St' },
   });
-  await ctx.bot.sendMessage(
-    chatId,
-    'Great. What is the *full address* where you need build help?\n' +
-      '(Street, city, ZIP — used to estimate the travel surcharge.)',
-    {
-      parse_mode: 'Markdown',
-      reply_markup: {
-        force_reply: true,
-        input_field_placeholder: '123 Main St, San Francisco, CA 94110',
-      },
-    }
-  );
 }
 
-// Called from the text handler once we have the address in session.
-// New flow: create an OPEN job (no charge yet) and notify builders. The travel
-// cost is priced when a builder accepts (from that builder's address), then the
-// customer is sent a payment link.
-// Collect the address, then show a confirm summary before submitting (#9).
-export async function receiveAddress(ctx, chatId, telegramId, address) {
-  const session = ctx.sessions.get(chatId);
-  if (!session?.data?.startIso) {
-    await ctx.bot.sendMessage(chatId, 'Let’s start over — tap "Book build help".');
-    ctx.sessions.delete(chatId);
-    return;
-  }
-  const { startIso, endIso } = session.data;
-  ctx.sessions.set(chatId, { ...session, step: 'awaiting_confirm', data: { startIso, endIso, address } });
+// Address is collected in pieces (street → city → ZIP) and combined.
+export async function receiveStreet(ctx, chatId, street) {
+  const s = ctx.sessions.get(chatId);
+  if (s?.flow !== 'book' || s.step !== 'awaiting_street') return;
+  ctx.sessions.set(chatId, { ...s, step: 'awaiting_city', data: { ...s.data, street } });
+  await ctx.bot.sendMessage(chatId, 'And the *city*?', {
+    parse_mode: 'Markdown',
+    reply_markup: { force_reply: true, input_field_placeholder: 'San Francisco' },
+  });
+}
+
+export async function receiveCity(ctx, chatId, city) {
+  const s = ctx.sessions.get(chatId);
+  if (s?.flow !== 'book' || s.step !== 'awaiting_city') return;
+  ctx.sessions.set(chatId, { ...s, step: 'awaiting_zip', data: { ...s.data, city } });
+  await ctx.bot.sendMessage(chatId, 'And your *ZIP code*?', {
+    parse_mode: 'Markdown',
+    reply_markup: { force_reply: true, input_field_placeholder: '94110' },
+  });
+}
+
+// Final address piece → combine + show the confirm (with the travel choice).
+export async function receiveZip(ctx, chatId, telegramId, zip) {
+  const s = ctx.sessions.get(chatId);
+  if (s?.flow !== 'book' || s.step !== 'awaiting_zip' || !s.data?.startIso) return;
+  const { startIso, endIso, street, city } = s.data;
+  const address = `${street}, ${city}, CA ${zip}`.replace(/\s+/g, ' ').trim();
+  ctx.sessions.set(chatId, { ...s, step: 'awaiting_confirm', data: { startIso, endIso, address } });
+  const fee = await serviceFeeCents();
   await ctx.bot.sendMessage(
     chatId,
-    `Please confirm your request:\n\n🕒 ${fmtHourRange(startIso, endIso)}\n📍 ${address}\n` +
-      `💵 Base ${usd(await serviceFeeCents())} + travel (priced when an Administrator accepts)`,
+    `Please confirm your request:\n\n🕒 ${fmtHourRange(startIso, endIso)}\n📍 ${address}\n\n` +
+      `How should the Administrator’s travel work?`,
     {
       parse_mode: 'Markdown',
       reply_markup: {
         inline_keyboard: [
-          [{ text: '✅ Confirm request', callback_data: 'book:reqok' }],
+          [{ text: `✅ Add Uber travel (~${usd(config.uber.flatFallbackCents)})`, callback_data: 'book:reqok:travel' }],
+          [{ text: `✅ I’ll book their ride — ${usd(fee)} only`, callback_data: 'book:reqok:ride' }],
           [{ text: '✖ Cancel', callback_data: 'book:cancel' }],
         ],
       },
@@ -101,7 +107,7 @@ export async function receiveAddress(ctx, chatId, telegramId, address) {
   );
 }
 
-export async function confirmRequest(ctx, chatId, telegramId) {
+export async function confirmRequest(ctx, chatId, telegramId, ownRide = false) {
   const session = ctx.sessions.get(chatId);
   if (session?.step !== 'awaiting_confirm' || !session?.data?.startIso) {
     await ctx.bot.sendMessage(chatId, 'That request expired — tap /book to start again.');
@@ -124,19 +130,32 @@ export async function confirmRequest(ctx, chatId, telegramId) {
     slot_end: endIso,
     service_fee_cents: serviceFee,
     surcharge_cents: 0,
-    surcharge_source: 'pending',
-    total_cents: serviceFee, // placeholder until a builder accepts
+    // Own-ride bookings are pre-priced (no travel); others price on acceptance.
+    surcharge_source: ownRide ? 'customer_ride' : 'pending',
+    total_cents: serviceFee, // placeholder until a builder accepts (or final, for own-ride)
     status: 'awaiting_acceptance',
+    customer_books_ride: ownRide,
   });
 
+  const tail = ownRide
+    ? `You’re booking the Administrator’s ride, so your total is just *${usd(serviceFee)}*. An Administrator will accept, then we’ll send your payment link.`
+    : `An Administrator will accept your job, then we’ll send your payment link (service ${usd(serviceFee)} + one-way travel).`;
   await ctx.bot.sendMessage(
     chatId,
-    `📝 *Request submitted* for ${fmtHourRange(startIso, endIso)}\n📍 ${address}\n\n` +
-      `An Administrator will accept your job, then we’ll send your payment link ` +
-      `(service ${usd(serviceFee)} + travel from the Administrator to you).`,
+    `📝 *Request submitted* for ${fmtHourRange(startIso, endIso)}\n📍 ${address}\n\n${tail}`,
     { parse_mode: 'Markdown' }
   );
   await notifyExpertsOfOpenBooking(ctx, booking);
+
+  // Upsell bricks at 20% off, before they pay (#11).
+  await ctx.bot.sendMessage(
+    chatId,
+    `🧱 *While you’re here* — add bricks to your build and take *20% off* your parts order.`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: [[{ text: '🧱 Add bricks (20% off)', callback_data: 'shop:upsell' }]] },
+    }
+  );
 }
 
 // Customer chose to pay → present available payment methods (card / crypto).

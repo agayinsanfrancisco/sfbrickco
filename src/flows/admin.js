@@ -39,7 +39,7 @@ function ensureAdmin(ctx, chatId, telegramId) {
 
 export async function showMenu(ctx, chatId, telegramId) {
   if (!ensureAdmin(ctx, chatId, telegramId)) return;
-  await ctx.bot.sendMessage(chatId, '⚙️ *Admin panel*', {
+  await ctx.bot.sendMessage(chatId, '⚙️ *Owner panel*', {
     parse_mode: 'Markdown',
     ...adminMenu(),
   });
@@ -178,10 +178,17 @@ export async function assignExpert(ctx, chatId, telegramId, bookingId, expertId)
     await ctx.bot.sendMessage(chatId, 'That Administrator has no base address set — they need to add one first.');
     return;
   }
-  const est = await estimateBetween(builder.address, booking.customer_address);
-  const surcharge = est.ok ? est.surchargeCents : config.uber.flatFallbackCents;
+  let surcharge, source;
+  if (booking.customer_books_ride) {
+    surcharge = 0;
+    source = 'customer_ride';
+  } else {
+    const est = await estimateBetween(builder.address, booking.customer_address);
+    surcharge = est.ok ? est.surchargeCents : config.uber.flatFallbackCents;
+    source = 'estimate';
+  }
   const total = booking.service_fee_cents + surcharge;
-  const accepted = await acceptOpenBooking(bookingId, expertId, { surchargeCents: surcharge, totalCents: total });
+  const accepted = await acceptOpenBooking(bookingId, expertId, { surchargeCents: surcharge, totalCents: total, source });
   if (!accepted) {
     await ctx.bot.sendMessage(chatId, 'That booking is no longer open.');
     return;

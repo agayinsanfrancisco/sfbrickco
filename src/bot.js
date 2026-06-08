@@ -110,7 +110,8 @@ export function createBot() {
   };
   bot.onText(/^\/builder/, openBuilderPortal);
   bot.onText(/^\/expert/, openBuilderPortal);
-  bot.onText(/^\/admin/, (msg) => admin.showMenu(ctx, msg.chat.id, msg.from.id));
+  // Owner control panel — /owner (and /admin kept as a hidden alias).
+  bot.onText(/^\/(owner|admin)/, (msg) => admin.showMenu(ctx, msg.chat.id, msg.from.id));
 
   bot.onText(/^\/skip/, async (msg) => {
     const s = sessions.get(msg.chat.id);
@@ -143,14 +144,22 @@ export function createBot() {
     try {
       if (s.flow === 'shop' && s.step === 'awaiting_qty') {
         await shop.chooseQty(ctx, chatId, Number.parseInt(msg.text.trim(), 10));
-      } else if (s.flow === 'shop' && s.step === 'awaiting_delivery_address') {
-        await shop.receiveDeliveryAddress(ctx, chatId, telegramId, msg.text.trim());
+      } else if (s.flow === 'shop' && s.step === 'awaiting_street') {
+        await shop.receiveStreet(ctx, chatId, msg.text.trim());
+      } else if (s.flow === 'shop' && s.step === 'awaiting_city') {
+        await shop.receiveCity(ctx, chatId, msg.text.trim());
+      } else if (s.flow === 'shop' && s.step === 'awaiting_zip') {
+        await shop.receiveZip(ctx, chatId, msg.text.trim());
       } else if (s.flow === 'shop' && s.step === 'awaiting_phone') {
         await shop.receivePhone(ctx, chatId, telegramId, msg.text.trim(), msg.from.username);
       } else if (s.flow === 'shop' && s.step === 'awaiting_note') {
         await shop.receiveNote(ctx, chatId, telegramId, msg.text.trim());
-      } else if (s.flow === 'book' && s.step === 'awaiting_address') {
-        await booking.receiveAddress(ctx, chatId, telegramId, msg.text.trim());
+      } else if (s.flow === 'book' && s.step === 'awaiting_street') {
+        await booking.receiveStreet(ctx, chatId, msg.text.trim());
+      } else if (s.flow === 'book' && s.step === 'awaiting_city') {
+        await booking.receiveCity(ctx, chatId, msg.text.trim());
+      } else if (s.flow === 'book' && s.step === 'awaiting_zip') {
+        await booking.receiveZip(ctx, chatId, telegramId, msg.text.trim());
       } else if (s.flow === 'admin' && s.step === 'awaiting_add_expert') {
         await admin.doAddExpert(ctx, chatId, msg.text);
       } else if (s.flow === 'admin' && s.step === 'awaiting_remove') {
@@ -213,7 +222,9 @@ export function createBot() {
       else if (data === 'shop:cart') await shop.showCart(ctx, chatId);
       else if (data === 'shop:checkout') await shop.checkout(ctx, chatId);
       else if (data === 'shop:clear') await shop.clearCart(ctx, chatId);
+      else if (data === 'shop:upsell') await shop.startUpsell(ctx, chatId, 20);
       else if (data === 'shop:lastaddr') await shop.useLastAddress(ctx, chatId);
+      else if (data === 'shop:newaddr') await shop.promptNewAddress(ctx, chatId);
       else if (data === 'shop:noteskip') await shop.skipNote(ctx, chatId, telegramId);
       // Booking
       else if (data === 'book:start') await booking.startBooking(ctx, chatId);
@@ -223,7 +234,8 @@ export function createBot() {
         await booking.pickHour(ctx, chatId, sliceAfter(data, 'book:hour:'));
       else if (data.startsWith('book:pay:'))
         await booking.payBooking(ctx, chatId, telegramId, sliceAfter(data, 'book:pay:'));
-      else if (data === 'book:reqok') await booking.confirmRequest(ctx, chatId, telegramId);
+      else if (data === 'book:reqok:travel') await booking.confirmRequest(ctx, chatId, telegramId, false);
+      else if (data === 'book:reqok:ride') await booking.confirmRequest(ctx, chatId, telegramId, true);
       else if (data === 'book:cancel') await booking.cancelBooking(ctx, chatId);
       // Payments (method selection / crypto / admin confirm)
       else if (data.startsWith('pm:')) {

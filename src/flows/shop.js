@@ -1,5 +1,5 @@
 import { config } from '../config.js';
-import { listProducts, getProduct, createOrder, lastDeliveryAddress, logEvent } from '../supabase.js';
+import { listProducts, getProduct, createOrder, lastDeliveryAddress, logEvent, setOrderPromo } from '../supabase.js';
 import { priceForProduct, packOptions } from '../lib/pricing.js';
 import { estimateSurcharge } from '../uber.js';
 import { qtyKeyboard } from '../lib/keyboards.js';
@@ -14,6 +14,13 @@ function getCart(ctx, chatId) {
 }
 function qtyInCart(cart, sku) {
   return cart.filter((i) => i.sku === sku).reduce((s, i) => s + i.qty, 0);
+}
+
+// Entry from the post-booking upsell: start shopping with a standing 20% off
+// that auto-applies to the resulting order (#11).
+export async function startUpsell(ctx, chatId, percent = 20) {
+  ctx.sessions.set(chatId, { flow: 'shop', cart: [], upsellPercent: percent });
+  await startShop(ctx, chatId);
 }
 
 export async function startShop(ctx, chatId) {
@@ -118,8 +125,8 @@ async function addToCart(ctx, chatId, sku, qty) {
 
 // Preserve any in-progress checkout fields when we rewrite the session.
 function keepCheckout(s) {
-  const { address, deliveryFee, phone, handle, lastAddr } = s;
-  return { address, deliveryFee, phone, handle, lastAddr };
+  const { address, deliveryFee, phone, handle, lastAddr, upsellPercent } = s;
+  return { address, deliveryFee, phone, handle, lastAddr, upsellPercent };
 }
 
 export async function showCart(ctx, chatId) {
@@ -150,7 +157,14 @@ export async function clearCart(ctx, chatId) {
   await ctx.bot.sendMessage(chatId, '🗑️ Cart cleared.');
 }
 
-// Checkout the whole cart → collect delivery address.
+async function askStreet(ctx, chatId) {
+  await ctx.bot.sendMessage(chatId, '📍 What’s your *street address*?', {
+    parse_mode: 'Markdown',
+    reply_markup: { force_reply: true, input_field_placeholder: '123 Main St' },
+  });
+}
+
+// Checkout the whole cart → collect delivery address (street → city → ZIP).
 export async function checkout(ctx, chatId) {
   const cart = getCart(ctx, chatId);
   if (!cart.length) {
@@ -158,37 +172,75 @@ export async function checkout(ctx, chatId) {
     return;
   }
   const last = await lastDeliveryAddress(chatId);
-  ctx.sessions.set(chatId, { flow: 'shop', cart, step: 'awaiting_delivery_address', lastAddr: last });
-  const reply_markup = last
-    ? { inline_keyboard: [[{ text: `📍 Use last: ${last.slice(0, 40)}`, callback_data: 'shop:lastaddr' }]] }
-    : { force_reply: true, input_field_placeholder: '123 Main St, San Francisco, CA 94110' };
-  await ctx.bot.sendMessage(
-    chatId,
-    `📍 What’s the *delivery address*? (Street, city, ZIP)\n` +
-      `We courier your order by Uber and add the delivery fee at checkout.`,
-    { parse_mode: 'Markdown', reply_markup }
-  );
+  const s = ctx.sessions.get(chatId) || {};
+  ctx.sessions.set(chatId, { ...keepCheckout(s), flow: 'shop', cart, step: 'awaiting_street', lastAddr: last });
+  if (last) {
+    await ctx.bot.sendMessage(chatId, `📍 Deliver to your last address?\n${last}`, {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '📍 Use this address', callback_data: 'shop:lastaddr' }],
+          [{ text: '✏️ Enter a new address', callback_data: 'shop:newaddr' }],
+        ],
+      },
+    });
+  } else {
+    await askStreet(ctx, chatId);
+  }
+}
+
+export async function promptNewAddress(ctx, chatId) {
+  const s = ctx.sessions.get(chatId) || {};
+  ctx.sessions.set(chatId, { ...s, step: 'awaiting_street' });
+  await askStreet(ctx, chatId);
 }
 
 export async function useLastAddress(ctx, chatId) {
   const s = ctx.sessions.get(chatId);
   if (!s?.lastAddr) {
-    await ctx.bot.sendMessage(chatId, 'Please type your delivery address.');
+    await askStreet(ctx, chatId);
     return;
   }
-  await receiveDeliveryAddress(ctx, chatId, chatId, s.lastAddr);
+  await addressComplete(ctx, chatId, s.lastAddr);
 }
 
-export async function receiveDeliveryAddress(ctx, chatId, _telegramId, address) {
+export async function receiveStreet(ctx, chatId, street) {
+  const s = ctx.sessions.get(chatId);
+  if (s?.flow !== 'shop' || s.step !== 'awaiting_street') return;
+  ctx.sessions.set(chatId, { ...s, step: 'awaiting_city', street });
+  await ctx.bot.sendMessage(chatId, 'And the *city*?', {
+    parse_mode: 'Markdown',
+    reply_markup: { force_reply: true, input_field_placeholder: 'San Francisco' },
+  });
+}
+
+export async function receiveCity(ctx, chatId, city) {
+  const s = ctx.sessions.get(chatId);
+  if (s?.flow !== 'shop' || s.step !== 'awaiting_city') return;
+  ctx.sessions.set(chatId, { ...s, step: 'awaiting_zip', city });
+  await ctx.bot.sendMessage(chatId, 'And your *ZIP code*?', {
+    parse_mode: 'Markdown',
+    reply_markup: { force_reply: true, input_field_placeholder: '94110' },
+  });
+}
+
+export async function receiveZip(ctx, chatId, zip) {
+  const s = ctx.sessions.get(chatId);
+  if (s?.flow !== 'shop' || s.step !== 'awaiting_zip') return;
+  const address = `${s.street}, ${s.city}, CA ${zip}`.replace(/\s+/g, ' ').trim();
+  await addressComplete(ctx, chatId, address);
+}
+
+async function addressComplete(ctx, chatId, address) {
   const s = ctx.sessions.get(chatId);
   if (!s?.cart?.length) return;
   const est = await estimateSurcharge(address);
   if (est.ok && est.tooFar) {
     await ctx.bot.sendMessage(
       chatId,
-      `😔 That address is ~${est.miles} mi out — beyond our ${config.uber.maxMiles}-mile delivery area. Try another address.`
+      `😔 That address is ~${est.miles} mi out — beyond our ${config.uber.maxMiles}-mile delivery area. Tap /shop and try another address.`
     );
-    return; // stay on the address step so they can re-enter
+    ctx.sessions.delete(chatId);
+    return;
   }
   const deliveryFee = est.ok ? est.surchargeCents : config.uber.flatFallbackCents;
   ctx.sessions.set(chatId, { ...s, step: 'awaiting_phone', address, deliveryFee });
@@ -226,7 +278,7 @@ async function finalizeOrder(ctx, chatId, telegramId, note) {
   // Free-delivery threshold (#45): 0 = disabled.
   const threshold = await getIntSetting('free_delivery_threshold_cents', 0);
   const deliveryFee = deliveryAfterThreshold(subtotal, s.deliveryFee, threshold);
-  const order = await createOrder({
+  let order = await createOrder({
     telegramId,
     sku: cart.length === 1 ? cart[0].sku : `cart:${cart.length}`,
     qty: totalQty,
@@ -238,7 +290,13 @@ async function finalizeOrder(ctx, chatId, telegramId, note) {
     notes: note,
     items: cart,
   });
-  logEvent(telegramId, 'order_created', { items: cart.length, qty: totalQty, cents: subtotal });
+  // Post-booking upsell discount auto-applies to the parts subtotal (#11).
+  if (s.upsellPercent) {
+    const discount = Math.round((subtotal * s.upsellPercent) / 100);
+    const updated = await setOrderPromo(order.id, { code: `BUILD${s.upsellPercent}`, discountCents: discount });
+    if (updated) order = updated;
+  }
+  logEvent(telegramId, 'order_created', { items: cart.length, qty: totalQty, cents: subtotal, upsell: !!s.upsellPercent });
   await ctx.bot.sendMessage(chatId, `✅ Order *${shortRef(order.id)}* created — thanks!`, {
     parse_mode: 'Markdown',
     reply_markup: { remove_keyboard: true },
