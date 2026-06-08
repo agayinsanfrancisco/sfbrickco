@@ -4,7 +4,7 @@ import { upcomingDays, hourlySlots, isCovered } from '../lib/slots.js';
 import { daysKeyboard, hoursKeyboard } from '../lib/keyboards.js';
 import { usd, fmtHourRange } from '../lib/format.js';
 import { getIntSetting, getBoolSetting } from '../lib/settings.js';
-import { presentBookingMethods } from './payments.js';
+import { presentWaiver } from './payments.js';
 import { notifyExpertsOfOpenBooking } from './expert.js';
 
 // Service fee: admin-editable setting, falling back to the env-derived default.
@@ -182,9 +182,9 @@ export async function confirmRequest(ctx, chatId, telegramId) {
   );
 }
 
-// Customer chose to pay → present available payment methods (card / crypto).
+// Customer chose to pay → show the waiver gate first, then payment methods.
 export async function payBooking(ctx, chatId, _telegramId, bookingId) {
-  await presentBookingMethods(ctx, chatId, bookingId);
+  await presentWaiver(ctx, chatId, 'b', bookingId);
 }
 
 export function cancelBooking(ctx, chatId) {

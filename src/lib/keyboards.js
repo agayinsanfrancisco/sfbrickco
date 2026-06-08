@@ -4,7 +4,7 @@
 export function mainMenu({ isExpert, isAdmin } = {}) {
   const rows = [
     [{ text: '🧱 Shop bricks & parts', callback_data: 'shop:start' }],
-    [{ text: '🛠️ Book build help', callback_data: 'book:start' }],
+    [{ text: '🛠️ Book an Administrator', callback_data: 'book:start' }],
     [
       { text: '💰 Wallet', callback_data: 'wal:menu' },
       { text: '🧾 My orders', callback_data: 'acct:orders' },

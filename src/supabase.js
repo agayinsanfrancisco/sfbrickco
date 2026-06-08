@@ -405,6 +405,14 @@ export async function getBooking(id) {
   return data;
 }
 
+// Legal record: explicit waiver/terms acceptance at checkout.
+export async function recordOrderWaiver(id) {
+  await supabase.from('orders').update({ waiver_accepted_at: new Date().toISOString() }).eq('id', id);
+}
+export async function recordBookingWaiver(id) {
+  await supabase.from('bookings').update({ waiver_accepted_at: new Date().toISOString() }).eq('id', id);
+}
+
 export async function setBookingCrypto(
   id,
   {

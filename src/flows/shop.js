@@ -6,7 +6,7 @@ import { qtyKeyboard } from '../lib/keyboards.js';
 import { usd, shortRef } from '../lib/format.js';
 import { getBoolSetting, getIntSetting } from '../lib/settings.js';
 import { deliveryAfterThreshold, cartSubtotalCents } from '../lib/money.js';
-import { presentOrderMethods } from './payments.js';
+import { presentWaiver } from './payments.js';
 
 // Cart lives in the session as `cart: [{ sku, name, qty, line_cents }]`.
 function getCart(ctx, chatId) {
@@ -37,7 +37,7 @@ export async function startShop(ctx, chatId) {
   const rows = products.map((p) => [{ text: p.name, callback_data: `shop:p:${p.sku}` }]);
   const cart = getCart(ctx, chatId);
   if (cart.length) rows.push([{ text: `🛒 View cart (${cart.length})`, callback_data: 'shop:cart' }]);
-  rows.push([{ text: '🛠️ Add an Administrator', callback_data: 'shop:addadmin' }]);
+  rows.push([{ text: '🛠️ Hire an Admin', callback_data: 'shop:addadmin' }]);
   await ctx.bot.sendMessage(chatId, '🧱 *Shop* — pick a product:', {
     parse_mode: 'Markdown',
     reply_markup: { inline_keyboard: rows },
@@ -145,7 +145,7 @@ export async function showCart(ctx, chatId) {
       reply_markup: {
         inline_keyboard: [
           [{ text: '➕ Add another', callback_data: 'shop:start' }],
-          [{ text: '🛠️ Add an Administrator', callback_data: 'shop:addadmin' }],
+          [{ text: '🛠️ Hire an Admin', callback_data: 'shop:addadmin' }],
           [{ text: '✅ Checkout', callback_data: 'shop:checkout' }],
           [{ text: '🗑️ Clear cart', callback_data: 'shop:clear' }],
         ],
@@ -303,7 +303,7 @@ async function finalizeOrder(ctx, chatId, telegramId, note) {
     parse_mode: 'Markdown',
     reply_markup: { remove_keyboard: true },
   });
-  await presentOrderMethods(ctx, chatId, order, cart.length === 1 ? await getProduct(cart[0].sku) : null);
+  await presentWaiver(ctx, chatId, 'o', order.id);
 }
 
 export async function receiveNote(ctx, chatId, telegramId, text) {

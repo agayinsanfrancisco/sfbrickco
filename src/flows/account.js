@@ -11,7 +11,7 @@ import {
   cancelOrder,
   cancelBookingById,
 } from '../supabase.js';
-import { presentOrderMethods, presentBookingMethods } from './payments.js';
+import { presentWaiver } from './payments.js';
 
 export async function showHelp(ctx, chatId, telegramId) {
   const user = await getUserByTelegramId(telegramId);
@@ -123,10 +123,9 @@ export async function showOrderPayment(ctx, chatId, orderId) {
     await ctx.bot.sendMessage(chatId, 'That order is no longer awaiting payment.');
     return;
   }
-  const product = await getProduct(order.sku);
-  await presentOrderMethods(ctx, chatId, order, product);
+  await presentWaiver(ctx, chatId, 'o', orderId);
 }
 
 export async function showBookingPayment(ctx, chatId, bookingId) {
-  await presentBookingMethods(ctx, chatId, bookingId);
+  await presentWaiver(ctx, chatId, 'b', bookingId);
 }

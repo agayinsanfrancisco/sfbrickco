@@ -49,6 +49,7 @@ create table if not exists orders (
   discount_cents     int not null default 0,     -- promo discount (#19)
   promo_code         text,
   items              jsonb,                       -- multi-item cart line items (#17)
+  waiver_accepted_at timestamptz,                 -- checkout waiver acceptance
   created_at         timestamptz not null default now()
 );
 create unique index if not exists orders_idempotency_key_uq
@@ -66,7 +67,8 @@ create table if not exists bookings (
   service_fee_cents     int not null default 5000,
   surcharge_cents       int not null default 0,
   surcharge_source      text not null default 'pending'
-                          check (surcharge_source in ('estimate', 'manual', 'pending')),
+                          check (surcharge_source in ('estimate', 'manual', 'pending', 'customer_ride')),
+  customer_books_ride   boolean not null default false,  -- customer books the ride → no travel fee
   distance_miles        numeric,
   total_cents           int not null,
   payment_status        text not null default 'unpaid'

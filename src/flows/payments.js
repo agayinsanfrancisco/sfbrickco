@@ -23,6 +23,8 @@ import {
   getPromo,
   redeemPromo,
   setOrderPromo,
+  recordOrderWaiver,
+  recordBookingWaiver,
 } from '../supabase.js';
 
 // Crypto-only payments (BTC/LTC). With an xpub configured, each order gets a
@@ -36,6 +38,61 @@ function methodButtons(kind, ref) {
   if (crypto.isCoinAvailable('ltc'))
     rows.push([{ text: 'Ł Litecoin', callback_data: `pm:${kind}:ltc:${ref}` }]);
   return rows;
+}
+
+// ── Checkout waiver (must accept before any payment) ─────────────────
+const WAIVER_ORDER =
+  '⚠️ *Before you pay — please read carefully*\n\n' +
+  'By tapping *“I agree”* you acknowledge and agree that:\n' +
+  '• Our parts are independent, third-party accessories, sold strictly *“AS IS”* and *“AS AVAILABLE”* with no warranties of any kind, express or implied (including merchantability or fitness for a particular purpose).\n' +
+  '• You assume *all risks* arising from the purchase, handling, and use of the parts, including choking or other hazards, injury, property damage, or loss.\n' +
+  '• To the maximum extent permitted by law, SF Brick Company, @redbluebrick_bot, and their owners and operators disclaim *all liability*, and you agree to *indemnify and hold them harmless* from any claim, damage, or expense arising from your order.\n' +
+  '• You are at least 18 years old and agree to our Terms.\n\n' +
+  'Do you agree?';
+
+const WAIVER_BOOKING =
+  '⚠️ *Before you pay — please read carefully*\n\n' +
+  'By tapping *“I agree”* you acknowledge and agree that:\n' +
+  '• Administrators are *independent third-party contractors*. They are NOT employees, agents, partners, or affiliates of SF Brick Company, @redbluebrick_bot, or their owners/operators, who act solely as a venue connecting you with the Administrator and are not a party to, and bear no responsibility for, the session or the Administrator’s conduct.\n' +
+  '• You assume *all risks* of an in-person, on-site session — including any bodily injury, property damage, theft, or loss — whether arising from negligence or otherwise.\n' +
+  '• The service is provided *“AS IS”*. To the maximum extent permitted by law, SF Brick Company and its owners/operators disclaim *all liability* and all warranties, and you agree to *indemnify, defend, and hold them harmless* from any and all claims, damages, or expenses arising from your booking.\n' +
+  '• You are at least 18, you authorize entry to the address you provided, and you enter this agreement knowingly and voluntarily.\n\n' +
+  'Do you agree?';
+
+export async function presentWaiver(ctx, chatId, kind, ref) {
+  await ctx.bot.sendMessage(chatId, kind === 'b' ? WAIVER_BOOKING : WAIVER_ORDER, {
+    parse_mode: 'Markdown',
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '✅ I agree — continue to payment', callback_data: `pm:agree:${kind}:${ref}` }],
+        [{ text: '✖ No, cancel', callback_data: `pm:agreeno:${kind}:${ref}` }],
+      ],
+    },
+  });
+}
+
+export async function acceptWaiver(ctx, chatId, telegramId, kind, ref) {
+  if (kind === 'b') {
+    const booking = await getBooking(ref);
+    if (!booking) {
+      await ctx.bot.sendMessage(chatId, 'That booking could not be found.');
+      return;
+    }
+    await recordBookingWaiver(ref);
+    await presentBookingMethods(ctx, chatId, ref);
+  } else {
+    const order = await getOrder(ref);
+    if (!order || order.status !== 'pending') {
+      await ctx.bot.sendMessage(chatId, 'That order is no longer awaiting payment.');
+      return;
+    }
+    await recordOrderWaiver(ref);
+    await presentOrderMethods(ctx, chatId, order, null);
+  }
+}
+
+export async function declineWaiver(ctx, chatId, _kind, _ref) {
+  await ctx.bot.sendMessage(chatId, 'No problem — you were not charged. Tap /start whenever you’re ready.');
 }
 
 // Order row already created (with delivery + contact). Show totals + methods.

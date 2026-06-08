@@ -38,7 +38,7 @@ export function createBot() {
   bot
     .setMyCommands([
       { command: 'shop', description: 'Browse & order 3D-printed parts' },
-      { command: 'book', description: 'Book on-site build help in SF' },
+      { command: 'book', description: 'Book an Administrator (on-site build help)' },
       { command: 'wallet', description: 'Add funds & check your balance' },
       { command: 'orders', description: 'Your recent orders & bookings' },
       { command: 'help', description: 'How this bot works' },
@@ -252,7 +252,9 @@ export function createBot() {
           // pm:re:<kind>:<coin>:<ref> — re-quote a fresh address/rate
           if (p[1] === 'o') await payments.payOrderCrypto(ctx, chatId, telegramId, p[2], p[3], { refresh: true });
           else if (p[1] === 'b') await payments.payBookingCrypto(ctx, chatId, telegramId, p[2], p[3], { refresh: true });
-        } else if (p[0] === 'promo') await payments.promptPromo(ctx, chatId, p[1]); // p[1]=orderId
+        } else if (p[0] === 'agree') await payments.acceptWaiver(ctx, chatId, telegramId, p[1], p[2]);
+        else if (p[0] === 'agreeno') await payments.declineWaiver(ctx, chatId, p[1], p[2]);
+        else if (p[0] === 'promo') await payments.promptPromo(ctx, chatId, p[1]); // p[1]=orderId
         else if (p[0] === 'sent') await payments.customerSent(ctx, chatId, p[1], p[2]);
         else if (p[0] === 'ok') await payments.adminConfirm(ctx, chatId, telegramId, p[1], p[2]);
         else if (p[0] === 'disp') await payments.adminDispatch(ctx, chatId, telegramId, p[1]);
