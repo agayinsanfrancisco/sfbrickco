@@ -223,6 +223,7 @@ export function createBot() {
       else if (data === 'shop:checkout') await shop.checkout(ctx, chatId);
       else if (data === 'shop:clear') await shop.clearCart(ctx, chatId);
       else if (data === 'shop:upsell') await shop.startUpsell(ctx, chatId, 20);
+      else if (data === 'shop:addadmin') await booking.startBooking(ctx, chatId);
       else if (data === 'shop:lastaddr') await shop.useLastAddress(ctx, chatId);
       else if (data === 'shop:newaddr') await shop.promptNewAddress(ctx, chatId);
       else if (data === 'shop:noteskip') await shop.skipNote(ctx, chatId, telegramId);
@@ -234,8 +235,9 @@ export function createBot() {
         await booking.pickHour(ctx, chatId, sliceAfter(data, 'book:hour:'));
       else if (data.startsWith('book:pay:'))
         await booking.payBooking(ctx, chatId, telegramId, sliceAfter(data, 'book:pay:'));
-      else if (data === 'book:reqok:travel') await booking.confirmRequest(ctx, chatId, telegramId, false);
-      else if (data === 'book:reqok:ride') await booking.confirmRequest(ctx, chatId, telegramId, true);
+      else if (data === 'book:travel:ride') await booking.chooseTravel(ctx, chatId, true);
+      else if (data === 'book:travel:flat') await booking.chooseTravel(ctx, chatId, false);
+      else if (data === 'book:reqok') await booking.confirmRequest(ctx, chatId, telegramId);
       else if (data === 'book:cancel') await booking.cancelBooking(ctx, chatId);
       // Payments (method selection / crypto / admin confirm)
       else if (data.startsWith('pm:')) {

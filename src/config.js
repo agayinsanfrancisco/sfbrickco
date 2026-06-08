@@ -77,9 +77,8 @@ export const config = {
   },
   adminIds: (process.env.ADMIN_TELEGRAM_IDS || '')
     .split(',')
-    .map((s) => s.trim())
-    .filter(Boolean)
-    .map((s) => Number.parseInt(s, 10)),
+    .map((s) => Number.parseInt(s.trim(), 10))
+    .filter((n) => Number.isInteger(n)), // ignore @handles / junk so admin never silently breaks
 };
 
 export function isAdminId(telegramId) {

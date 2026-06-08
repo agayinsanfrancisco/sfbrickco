@@ -37,6 +37,7 @@ export async function startShop(ctx, chatId) {
   const rows = products.map((p) => [{ text: p.name, callback_data: `shop:p:${p.sku}` }]);
   const cart = getCart(ctx, chatId);
   if (cart.length) rows.push([{ text: `🛒 View cart (${cart.length})`, callback_data: 'shop:cart' }]);
+  rows.push([{ text: '🛠️ Add an Administrator', callback_data: 'shop:addadmin' }]);
   await ctx.bot.sendMessage(chatId, '🧱 *Shop* — pick a product:', {
     parse_mode: 'Markdown',
     reply_markup: { inline_keyboard: rows },
@@ -144,6 +145,7 @@ export async function showCart(ctx, chatId) {
       reply_markup: {
         inline_keyboard: [
           [{ text: '➕ Add another', callback_data: 'shop:start' }],
+          [{ text: '🛠️ Add an Administrator', callback_data: 'shop:addadmin' }],
           [{ text: '✅ Checkout', callback_data: 'shop:checkout' }],
           [{ text: '🗑️ Clear cart', callback_data: 'shop:clear' }],
         ],

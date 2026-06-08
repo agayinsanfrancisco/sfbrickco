@@ -37,22 +37,17 @@ async function ensureExpert(ctx, chatId, telegramId) {
   return user;
 }
 
-// Card for an open job, showing the travel estimate from THIS builder's address.
-async function openJobCard(booking, builder) {
-  let costLine;
-  if (!builder.address) {
-    costLine = '\n⚠️ Set your base address (📍 Update my address) to price + accept.';
-  } else {
-    const est = await estimateBetween(builder.address, booking.customer_address);
-    costLine = est.ok
-      ? `\n🚕 Travel from you ≈ ${usd(est.surchargeCents)} (~${est.miles} mi)`
-      : '\n🚕 Travel: couldn’t estimate (a flat fee will apply)';
-  }
+// Card for an open job. Travel is fixed at request time (flat fee or the
+// customer books the ride), so it's the same for every Administrator.
+function openJobCard(booking) {
+  const travel = booking.customer_books_ride
+    ? '🚗 Customer books your ride'
+    : `🚕 ${usd(booking.surcharge_cents)} travel included`;
   return (
     `🛠️ *Open job*\n` +
     `🕑 ${fmtHourRange(booking.slot_start, booking.slot_end)}\n` +
     `📍 ${booking.customer_address}\n` +
-    `💵 Service fee ${usd(booking.service_fee_cents)}${costLine}`
+    `💵 *${usd(booking.total_cents)}* (service ${usd(booking.service_fee_cents)})\n${travel}`
   );
 }
 
@@ -184,7 +179,7 @@ export async function listJobs(ctx, chatId, telegramId) {
     return;
   }
   for (const b of open) {
-    await ctx.bot.sendMessage(chatId, await openJobCard(b, user), {
+    await ctx.bot.sendMessage(chatId, openJobCard(b), {
       parse_mode: 'Markdown',
       ...expertJobKeyboard(b.id),
     });
@@ -194,52 +189,34 @@ export async function listJobs(ctx, chatId, telegramId) {
 export async function accept(ctx, chatId, telegramId, bookingId) {
   const user = await ensureExpert(ctx, chatId, telegramId);
   if (!user) return;
-  if (!user.address) {
-    await ctx.bot.sendMessage(
-      chatId,
-      '📍 Set your base address first (📍 Update my address) so we can price the travel.'
-    );
-    return;
-  }
   const booking = await getBooking(bookingId);
   if (!booking || booking.status !== 'awaiting_acceptance') {
     await ctx.bot.sendMessage(chatId, 'That job is no longer open.');
     return;
   }
-  // If the customer is booking the ride themselves, there's no travel surcharge.
-  let surcharge, source;
-  if (booking.customer_books_ride) {
-    surcharge = 0;
-    source = 'customer_ride';
-  } else {
-    const est = await estimateBetween(user.address, booking.customer_address);
-    surcharge = est.ok ? est.surchargeCents : config.uber.flatFallbackCents;
-    source = 'estimate';
-  }
-  const total = booking.service_fee_cents + surcharge;
-  const accepted = await acceptOpenBooking(bookingId, user.id, {
-    surchargeCents: surcharge,
-    totalCents: total,
-    source,
-  });
+  // Travel + total are already fixed on the booking (flat fee or own-ride).
+  const accepted = await acceptOpenBooking(bookingId, user.id);
   if (!accepted) {
     await ctx.bot.sendMessage(chatId, 'Too late — another Administrator grabbed that one.');
     return;
   }
+  const travelNote = accepted.customer_books_ride
+    ? 'Customer is booking your ride.'
+    : `${usd(accepted.surcharge_cents)} travel included.`;
   await ctx.bot.sendMessage(
     chatId,
     `✅ You took the job for ${fmtHourRange(accepted.slot_start, accepted.slot_end)}.\n` +
-      `📍 ${accepted.customer_address}\nTravel ${usd(surcharge)}. Awaiting customer payment.`
+      `📍 ${accepted.customer_address}\n${travelNote} Awaiting customer payment.`
   );
   const rating = await expertRatingSummary(user.id);
   try {
     await ctx.bot.sendMessage(
       accepted.customer_telegram_id,
       `🎉 An Administrator (${ratingLine(rating)}) accepted your booking for ${fmtHourRange(accepted.slot_start, accepted.slot_end)}!\n` +
-        `• Service: ${usd(accepted.service_fee_cents)}\n• Travel: ${usd(surcharge)}\n• *Total: ${usd(total)}*\nTap to pay:`,
+        `• *Total: ${usd(accepted.total_cents)}*\nTap to pay:`,
       {
         parse_mode: 'Markdown',
-        reply_markup: { inline_keyboard: [[{ text: `Pay ${usd(total)}`, callback_data: `book:pay:${bookingId}` }]] },
+        reply_markup: { inline_keyboard: [[{ text: `Pay ${usd(accepted.total_cents)}`, callback_data: `book:pay:${bookingId}` }]] },
       }
     );
   } catch {
@@ -260,7 +237,7 @@ export async function notifyExpertsOfOpenBooking(ctx, booking) {
     const windows = await getExpertAvailability(e.id);
     if (windows.length && !isCovered(windows, booking.slot_start)) continue;
     try {
-      await ctx.bot.sendMessage(e.telegram_id, `📨 New open job:\n\n${await openJobCard(booking, e)}`, {
+      await ctx.bot.sendMessage(e.telegram_id, `📨 New open job:\n\n${openJobCard(booking)}`, {
         parse_mode: 'Markdown',
         ...expertJobKeyboard(booking.id),
       });

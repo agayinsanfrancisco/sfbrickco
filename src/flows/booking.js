@@ -17,16 +17,34 @@ export async function startBooking(ctx, chatId) {
     await ctx.bot.sendMessage(chatId, '🛠️ Bookings are paused right now — check back soon!');
     return;
   }
-  const days = upcomingDays(7);
   const fee = await serviceFeeCents();
+  const flat = config.uber.flatFallbackCents;
+  ctx.sessions.set(chatId, { flow: 'book', step: 'choosing_travel' });
   await ctx.bot.sendMessage(
     chatId,
     `🛠️ *Book an Administrator*\n\n` +
-      `One-time *${usd(fee)}* fee for a 1-hour on-site session, plus a one-way travel ` +
-      `surcharge (Uber, ~${usd(config.uber.flatFallbackCents)}). Or book the Administrator's ` +
-      `ride yourself and pay just *${usd(fee)}*.\n\nPick a day:`,
-    { parse_mode: 'Markdown', ...daysKeyboard(days) }
+      `One-time *${usd(fee)}* fee for a 1-hour on-site session. The Administrator needs a ride ` +
+      `to you — how do you want to handle it?`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: `🚗 I’ll book their ride — ${usd(fee)} total`, callback_data: 'book:travel:ride' }],
+          [{ text: `➕ Flat ${usd(flat)} travel fee — ${usd(fee + flat)} total`, callback_data: 'book:travel:flat' }],
+        ],
+      },
+    }
   );
+}
+
+// Travel decided up front → carry it through scheduling, then show days.
+export async function chooseTravel(ctx, chatId, ownRide) {
+  const s = ctx.sessions.get(chatId) || {};
+  ctx.sessions.set(chatId, { ...s, flow: 'book', ownRide, step: 'choosing_day' });
+  const days = upcomingDays(7);
+  await ctx.bot.sendMessage(chatId, 'Pick a day (sessions are bookable up to 12 hours ahead):', {
+    ...daysKeyboard(days),
+  });
 }
 
 export async function pickDay(ctx, chatId, dateKey) {
@@ -54,7 +72,8 @@ export async function pickHour(ctx, chatId, startIso) {
     );
     return;
   }
-  ctx.sessions.set(chatId, { flow: 'book', step: 'awaiting_street', data: { startIso, endIso } });
+  const s = ctx.sessions.get(chatId) || {};
+  ctx.sessions.set(chatId, { ...s, flow: 'book', step: 'awaiting_street', data: { startIso, endIso } });
   await ctx.bot.sendMessage(chatId, 'Great. What’s your *street address*?', {
     parse_mode: 'Markdown',
     reply_markup: { force_reply: true, input_field_placeholder: '123 Main St' },
@@ -82,7 +101,7 @@ export async function receiveCity(ctx, chatId, city) {
   });
 }
 
-// Final address piece → combine + show the confirm (with the travel choice).
+// Final address piece → combine + show the confirm summary.
 export async function receiveZip(ctx, chatId, telegramId, zip) {
   const s = ctx.sessions.get(chatId);
   if (s?.flow !== 'book' || s.step !== 'awaiting_zip' || !s.data?.startIso) return;
@@ -90,16 +109,19 @@ export async function receiveZip(ctx, chatId, telegramId, zip) {
   const address = `${street}, ${city}, CA ${zip}`.replace(/\s+/g, ' ').trim();
   ctx.sessions.set(chatId, { ...s, step: 'awaiting_confirm', data: { startIso, endIso, address } });
   const fee = await serviceFeeCents();
+  const surcharge = s.ownRide ? 0 : config.uber.flatFallbackCents;
+  const total = fee + surcharge;
+  const costLine = s.ownRide
+    ? `💵 *${usd(total)}* (you book the ride)`
+    : `💵 *${usd(total)}* (service ${usd(fee)} + ${usd(surcharge)} travel)`;
   await ctx.bot.sendMessage(
     chatId,
-    `Please confirm your request:\n\n🕒 ${fmtHourRange(startIso, endIso)}\n📍 ${address}\n\n` +
-      `How should the Administrator’s travel work?`,
+    `Please confirm your request:\n\n🕒 ${fmtHourRange(startIso, endIso)}\n📍 ${address}\n${costLine}`,
     {
       parse_mode: 'Markdown',
       reply_markup: {
         inline_keyboard: [
-          [{ text: `✅ Add Uber travel (~${usd(config.uber.flatFallbackCents)})`, callback_data: 'book:reqok:travel' }],
-          [{ text: `✅ I’ll book their ride — ${usd(fee)} only`, callback_data: 'book:reqok:ride' }],
+          [{ text: '✅ Confirm request', callback_data: 'book:reqok' }],
           [{ text: '✖ Cancel', callback_data: 'book:cancel' }],
         ],
       },
@@ -107,13 +129,14 @@ export async function receiveZip(ctx, chatId, telegramId, zip) {
   );
 }
 
-export async function confirmRequest(ctx, chatId, telegramId, ownRide = false) {
+export async function confirmRequest(ctx, chatId, telegramId) {
   const session = ctx.sessions.get(chatId);
   if (session?.step !== 'awaiting_confirm' || !session?.data?.startIso) {
     await ctx.bot.sendMessage(chatId, 'That request expired — tap /book to start again.');
     return;
   }
   const { startIso, endIso, address } = session.data;
+  const ownRide = !!session.ownRide;
   ctx.sessions.delete(chatId);
 
   // Re-check the slot at confirm time (it may have been taken meanwhile).
@@ -123,23 +146,24 @@ export async function confirmRequest(ctx, chatId, telegramId, ownRide = false) {
   }
 
   const serviceFee = await serviceFeeCents();
+  const surcharge = ownRide ? 0 : config.uber.flatFallbackCents;
+  const total = serviceFee + surcharge;
   const booking = await createBooking({
     customer_telegram_id: telegramId,
     customer_address: address,
     slot_start: startIso,
     slot_end: endIso,
     service_fee_cents: serviceFee,
-    surcharge_cents: 0,
-    // Own-ride bookings are pre-priced (no travel); others price on acceptance.
-    surcharge_source: ownRide ? 'customer_ride' : 'pending',
-    total_cents: serviceFee, // placeholder until a builder accepts (or final, for own-ride)
+    surcharge_cents: surcharge, // flat travel fee, or 0 if customer books the ride
+    surcharge_source: ownRide ? 'customer_ride' : 'manual',
+    total_cents: total, // final at request time (no per-distance pricing on accept)
     status: 'awaiting_acceptance',
     customer_books_ride: ownRide,
   });
 
   const tail = ownRide
-    ? `You’re booking the Administrator’s ride, so your total is just *${usd(serviceFee)}*. An Administrator will accept, then we’ll send your payment link.`
-    : `An Administrator will accept your job, then we’ll send your payment link (service ${usd(serviceFee)} + one-way travel).`;
+    ? `You’re booking the Administrator’s ride, so your total is *${usd(total)}*. An Administrator will accept, then we’ll send your payment link.`
+    : `Total *${usd(total)}* (service ${usd(serviceFee)} + ${usd(surcharge)} travel). An Administrator will accept, then we’ll send your payment link.`;
   await ctx.bot.sendMessage(
     chatId,
     `📝 *Request submitted* for ${fmtHourRange(startIso, endIso)}\n📍 ${address}\n\n${tail}`,

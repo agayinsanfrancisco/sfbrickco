@@ -165,37 +165,22 @@ export async function chooseExpertForBooking(ctx, chatId, telegramId, bookingId)
   });
 }
 
-// Step 2: assign on behalf — prices travel from the chosen builder's address.
+// Step 2: assign on behalf. Travel/total are already fixed on the booking.
 export async function assignExpert(ctx, chatId, telegramId, bookingId, expertId) {
   if (!ensureAdmin(ctx, chatId, telegramId)) return;
-  const builder = await getUserById(expertId);
   const booking = await getBooking(bookingId);
   if (!booking || booking.status !== 'awaiting_acceptance') {
     await ctx.bot.sendMessage(chatId, 'That booking is no longer open.');
     return;
   }
-  if (!builder?.address) {
-    await ctx.bot.sendMessage(chatId, 'That Administrator has no base address set — they need to add one first.');
-    return;
-  }
-  let surcharge, source;
-  if (booking.customer_books_ride) {
-    surcharge = 0;
-    source = 'customer_ride';
-  } else {
-    const est = await estimateBetween(builder.address, booking.customer_address);
-    surcharge = est.ok ? est.surchargeCents : config.uber.flatFallbackCents;
-    source = 'estimate';
-  }
-  const total = booking.service_fee_cents + surcharge;
-  const accepted = await acceptOpenBooking(bookingId, expertId, { surchargeCents: surcharge, totalCents: total, source });
+  const accepted = await acceptOpenBooking(bookingId, expertId);
   if (!accepted) {
     await ctx.bot.sendMessage(chatId, 'That booking is no longer open.');
     return;
   }
   await ctx.bot.sendMessage(
     chatId,
-    `✅ Assigned. Travel ${usd(surcharge)}; customer asked to pay ${usd(total)}.`,
+    `✅ Assigned. Customer asked to pay ${usd(accepted.total_cents)}.`,
     {
       reply_markup: {
         inline_keyboard: [[{ text: '✅ Log payment (paid another way)', callback_data: `pm:ok:b:${bookingId}` }]],
@@ -206,10 +191,10 @@ export async function assignExpert(ctx, chatId, telegramId, bookingId, expertId)
     await ctx.bot.sendMessage(
       accepted.customer_telegram_id,
       `🎉 An Administrator was assigned for ${fmtHourRange(accepted.slot_start, accepted.slot_end)}!\n` +
-        `• Service: ${usd(accepted.service_fee_cents)}\n• Travel: ${usd(surcharge)}\n• *Total: ${usd(total)}*\nTap to pay:`,
+        `• *Total: ${usd(accepted.total_cents)}*\nTap to pay:`,
       {
         parse_mode: 'Markdown',
-        reply_markup: { inline_keyboard: [[{ text: `Pay ${usd(total)}`, callback_data: `book:pay:${bookingId}` }]] },
+        reply_markup: { inline_keyboard: [[{ text: `Pay ${usd(accepted.total_cents)}`, callback_data: `book:pay:${bookingId}` }]] },
       }
     );
   } catch {

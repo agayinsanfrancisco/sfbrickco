@@ -2,7 +2,7 @@
 // Slots align to the top of the hour in UTC; display converts to Pacific.
 
 const HOUR_MS = 60 * 60 * 1000;
-export const WINDOW_MS = 24 * HOUR_MS; // can only book within the next 24h
+export const WINDOW_MS = 12 * HOUR_MS; // can only book within the next 12h
 
 // Day buckets the 24h window touches (today and possibly tomorrow, UTC).
 export function upcomingDays(_count = 2, now = new Date()) {
