@@ -28,7 +28,7 @@ export const config = {
     unitCents: int('LEGO_UNIT_PRICE_CENTS', 1000),
     bundleQty: int('LEGO_BUNDLE_QTY', 6),
     bundleCents: int('LEGO_BUNDLE_PRICE_CENTS', 4500),
-    serviceFeeCents: int('SERVICE_FEE_CENTS', 5000),
+    serviceFeeCents: int('SERVICE_FEE_CENTS', 4000),
   },
   crypto: {
     // Preferred: account xpub/zpub (BIP84 native segwit) → unique address per

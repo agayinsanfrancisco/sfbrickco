@@ -474,6 +474,18 @@ export async function listPendingBookings() {
   return data || [];
 }
 
+// Bookings a builder has accepted but the customer hasn't paid — the admin can
+// "log payment" here when paid off-platform, which schedules the builder.
+export async function listAwaitingPaymentBookings() {
+  const { data } = await supabase
+    .from('bookings')
+    .select('*')
+    .eq('status', 'awaiting_payment')
+    .eq('payment_status', 'unpaid')
+    .order('slot_start', { ascending: true });
+  return data || [];
+}
+
 // Open (unpaid) bookings awaiting a builder to accept.
 export async function listOpenBookings() {
   const { data } = await supabase

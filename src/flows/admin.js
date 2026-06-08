@@ -17,6 +17,7 @@ import {
   listRecentOrders,
   markOrderRefunded,
   markBookingRefunded,
+  listAwaitingPaymentBookings,
   setSetting,
   getInventory,
   setProductPrice,
@@ -116,9 +117,9 @@ export async function doRemove(ctx, chatId, text) {
 // List open (unaccepted) bookings with an "assign a builder" affordance.
 export async function showBookings(ctx, chatId, telegramId) {
   if (!ensureAdmin(ctx, chatId, telegramId)) return;
-  const open = await listOpenBookings();
-  if (!open.length) {
-    await ctx.bot.sendMessage(chatId, 'No open bookings awaiting a builder.');
+  const [open, awaitingPay] = await Promise.all([listOpenBookings(), listAwaitingPaymentBookings()]);
+  if (!open.length && !awaitingPay.length) {
+    await ctx.bot.sendMessage(chatId, 'No open or awaiting-payment bookings.');
     return;
   }
   for (const b of open) {
@@ -128,6 +129,19 @@ export async function showBookings(ctx, chatId, telegramId) {
         b.service_fee_cents
       )} (+ travel on accept)`,
       { reply_markup: { inline_keyboard: [[{ text: '👤 Assign a builder', callback_data: `adm:assign:${b.id}` }]] } }
+    );
+  }
+  for (const b of awaitingPay) {
+    await ctx.bot.sendMessage(
+      chatId,
+      `⏳ *Awaiting payment* — ${shortRef(b.id)}\n🕑 ${fmtHourRange(b.slot_start, b.slot_end)}\n📍 ${b.customer_address}\n` +
+        `💵 Total ${usd(b.total_cents)} (service ${usd(b.service_fee_cents)} + travel ${usd(b.surcharge_cents)})`,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [[{ text: '✅ Log payment (paid another way)', callback_data: `pm:ok:b:${b.id}` }]],
+        },
+      }
     );
   }
 }
@@ -172,7 +186,15 @@ export async function assignExpert(ctx, chatId, telegramId, bookingId, expertId)
     await ctx.bot.sendMessage(chatId, 'That booking is no longer open.');
     return;
   }
-  await ctx.bot.sendMessage(chatId, `✅ Assigned. Travel ${usd(surcharge)}; customer asked to pay ${usd(total)}.`);
+  await ctx.bot.sendMessage(
+    chatId,
+    `✅ Assigned. Travel ${usd(surcharge)}; customer asked to pay ${usd(total)}.`,
+    {
+      reply_markup: {
+        inline_keyboard: [[{ text: '✅ Log payment (paid another way)', callback_data: `pm:ok:b:${bookingId}` }]],
+      },
+    }
+  );
   try {
     await ctx.bot.sendMessage(
       accepted.customer_telegram_id,
@@ -253,8 +275,14 @@ export async function doFindOrder(ctx, chatId, text) {
     await ctx.bot.sendMessage(chatId, 'No matching order found.');
     return;
   }
-  const total = (o.amount_cents || 0) + (o.delivery_fee_cents || 0);
-  const canRefund = ['paid', 'dispatched', 'delivered'].includes(o.status);
+  const total = (o.amount_cents || 0) + (o.delivery_fee_cents || 0) - (o.discount_cents || 0);
+  const rows = [];
+  if (o.status === 'pending') {
+    rows.push([{ text: '✅ Log payment (paid another way)', callback_data: `pm:ok:o:${o.id}` }]);
+  }
+  if (['paid', 'dispatched', 'delivered'].includes(o.status)) {
+    rows.push([{ text: '↩️ Mark refunded', callback_data: `adm:refundo:${o.id}` }]);
+  }
   await ctx.bot.sendMessage(
     chatId,
     `🧾 *${shortRef(o.id)}*\n${orderItemsSummary(o)} · ${usd(total)}\nStatus: *${o.status}*\n` +
@@ -262,9 +290,7 @@ export async function doFindOrder(ctx, chatId, text) {
       `${o.notes ? `\n📝 ${o.notes}` : ''}${o.pay_txid ? `\n🔗 \`${o.pay_txid}\`` : ''}`,
     {
       parse_mode: 'Markdown',
-      reply_markup: canRefund
-        ? { inline_keyboard: [[{ text: '↩️ Mark refunded', callback_data: `adm:refundo:${o.id}` }]] }
-        : undefined,
+      reply_markup: rows.length ? { inline_keyboard: rows } : undefined,
     }
   );
 }
