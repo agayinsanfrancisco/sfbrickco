@@ -190,6 +190,22 @@ export async function assignExpert(ctx, chatId, telegramId, bookingId, expertId)
       },
     }
   );
+  // Notify the assigned Administrator (they didn't self-accept, so tell them).
+  const builder = await getUserById(expertId);
+  if (builder) {
+    const travel = accepted.customer_books_ride
+      ? 'Customer books your ride.'
+      : `${usd(accepted.surcharge_cents)} travel included.`;
+    try {
+      await ctx.bot.sendMessage(
+        builder.telegram_id,
+        `📋 You’ve been assigned a job for ${fmtHourRange(accepted.slot_start, accepted.slot_end)}.\n` +
+          `📍 ${accepted.customer_address}\n${travel} Total ${usd(accepted.total_cents)} — awaiting customer payment.`
+      );
+    } catch {
+      /* Administrator hasn't opened the bot */
+    }
+  }
   try {
     await ctx.bot.sendMessage(
       accepted.customer_telegram_id,
