@@ -27,11 +27,11 @@ function ratingLine(summary) {
 async function ensureExpert(ctx, chatId, telegramId) {
   const user = await getUserByTelegramId(telegramId);
   if (!user || (user.role !== 'expert' && user.role !== 'admin')) {
-    await ctx.bot.sendMessage(chatId, 'This area is for SF Brick Co builders only.');
+    await ctx.bot.sendMessage(chatId, 'This area is for SF Brick Co Administrators only.');
     return null;
   }
   if (!user.active) {
-    await ctx.bot.sendMessage(chatId, 'Your builder account is currently inactive.');
+    await ctx.bot.sendMessage(chatId, 'Your Administrator account is currently inactive.');
     return null;
   }
   return user;
@@ -84,19 +84,19 @@ export async function builderPortal(ctx, chatId, telegramId) {
   if (!user || (user.role !== 'expert' && user.role !== 'admin')) {
     await ctx.bot.sendMessage(
       chatId,
-      '👷 You’re not registered as a builder yet. Ask the admin to add your @handle, then tap /builder again.'
+      '👷 You’re not registered as an Administrator yet. Ask the team to add your @handle, then tap /builder again.'
     );
     return;
   }
   if (!user.active) {
-    await ctx.bot.sendMessage(chatId, 'Your builder account is currently inactive.');
+    await ctx.bot.sendMessage(chatId, 'Your Administrator account is currently inactive.');
     return;
   }
 
   const appts = await listBookingsForExpert(user.id);
   const rating = await expertRatingSummary(user.id);
   let body =
-    `👷 *Builder portal*\n📍 Base address: ${user.address || '— not set —'}\n` +
+    `👷 *Administrator portal*\n📍 Base address: ${user.address || '— not set —'}\n` +
     `${ratingLine(rating)}\n\n`;
   if (!appts.length) {
     body += 'You have no upcoming appointments. Tap *Open jobs* to accept one.';
@@ -214,7 +214,7 @@ export async function accept(ctx, chatId, telegramId, bookingId) {
     totalCents: total,
   });
   if (!accepted) {
-    await ctx.bot.sendMessage(chatId, 'Too late — another builder grabbed that one.');
+    await ctx.bot.sendMessage(chatId, 'Too late — another Administrator grabbed that one.');
     return;
   }
   await ctx.bot.sendMessage(
@@ -226,7 +226,7 @@ export async function accept(ctx, chatId, telegramId, bookingId) {
   try {
     await ctx.bot.sendMessage(
       accepted.customer_telegram_id,
-      `🎉 A builder (${ratingLine(rating)}) accepted your booking for ${fmtHourRange(accepted.slot_start, accepted.slot_end)}!\n` +
+      `🎉 An Administrator (${ratingLine(rating)}) accepted your booking for ${fmtHourRange(accepted.slot_start, accepted.slot_end)}!\n` +
         `• Service: ${usd(accepted.service_fee_cents)}\n• Travel: ${usd(surcharge)}\n• *Total: ${usd(total)}*\nTap to pay:`,
       {
         parse_mode: 'Markdown',
@@ -239,7 +239,7 @@ export async function accept(ctx, chatId, telegramId, bookingId) {
 }
 
 export async function decline(ctx, chatId, _bookingId) {
-  await ctx.bot.sendMessage(chatId, 'Skipped — it stays open for other builders.');
+  await ctx.bot.sendMessage(chatId, 'Skipped — it stays open for other Administrators.');
 }
 
 // Notify active builders of a new open job (each sees travel from their

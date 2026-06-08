@@ -69,8 +69,8 @@ export async function promptAddExpert(ctx, chatId, telegramId) {
   ctx.sessions.set(chatId, { flow: 'admin', step: 'awaiting_add_expert' });
   await ctx.bot.sendMessage(
     chatId,
-    'Send the builder’s *@handle* (Telegram username).\n' +
-      'They’ll become an active builder the moment they open the bot and tap /builder.',
+    'Send the Administrator’s *@handle* (Telegram username).\n' +
+      'They’ll become an active Administrator the moment they open the bot and tap /builder.',
     { parse_mode: 'Markdown' }
   );
 }
@@ -84,7 +84,7 @@ export async function doAddExpert(ctx, chatId, text) {
   }
   await ctx.bot.sendMessage(
     chatId,
-    `✅ Invited *@${handle}* as a builder. They’ll be activated automatically when they open the bot and tap /builder.`,
+    `✅ Invited *@${handle}* as an Administrator. They’ll be activated automatically when they open the bot and tap /builder.`,
     { parse_mode: 'Markdown' }
   );
 }
@@ -128,7 +128,7 @@ export async function showBookings(ctx, chatId, telegramId) {
       `🕑 ${fmtHourRange(b.slot_start, b.slot_end)}\n📍 ${b.customer_address}\n💵 Service ${usd(
         b.service_fee_cents
       )} (+ travel on accept)`,
-      { reply_markup: { inline_keyboard: [[{ text: '👤 Assign a builder', callback_data: `adm:assign:${b.id}` }]] } }
+      { reply_markup: { inline_keyboard: [[{ text: '👤 Assign an Administrator', callback_data: `adm:assign:${b.id}` }]] } }
     );
   }
   for (const b of awaitingPay) {
@@ -175,7 +175,7 @@ export async function assignExpert(ctx, chatId, telegramId, bookingId, expertId)
     return;
   }
   if (!builder?.address) {
-    await ctx.bot.sendMessage(chatId, 'That builder has no base address set — they need to add one first.');
+    await ctx.bot.sendMessage(chatId, 'That Administrator has no base address set — they need to add one first.');
     return;
   }
   const est = await estimateBetween(builder.address, booking.customer_address);
@@ -198,7 +198,7 @@ export async function assignExpert(ctx, chatId, telegramId, bookingId, expertId)
   try {
     await ctx.bot.sendMessage(
       accepted.customer_telegram_id,
-      `🎉 A builder was assigned for ${fmtHourRange(accepted.slot_start, accepted.slot_end)}!\n` +
+      `🎉 An Administrator was assigned for ${fmtHourRange(accepted.slot_start, accepted.slot_end)}!\n` +
         `• Service: ${usd(accepted.service_fee_cents)}\n• Travel: ${usd(surcharge)}\n• *Total: ${usd(total)}*\nTap to pay:`,
       {
         parse_mode: 'Markdown',

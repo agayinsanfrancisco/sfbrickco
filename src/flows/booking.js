@@ -22,7 +22,7 @@ export async function startBooking(ctx, chatId) {
     chatId,
     `🛠️ *Book on-site build help*\n\n` +
       `Base fee ${usd(await serviceFeeCents())} for a 1-hour on-site session, ` +
-      `plus a travel surcharge (Uber from the builder to you).\n\nPick a day:`,
+      `plus a travel surcharge (Uber from the Administrator to you).\n\nPick a day:`,
     { parse_mode: 'Markdown', ...daysKeyboard(days) }
   );
 }
@@ -37,7 +37,7 @@ export async function pickDay(ctx, chatId, dateKey) {
     chatId,
     open.length
       ? 'Pick a 1-hour start time (Pacific):'
-      : 'No builders are available that day — try another.',
+      : 'No Administrators are available that day — try another.',
     hoursKeyboard(open)
   );
 }
@@ -88,7 +88,7 @@ export async function receiveAddress(ctx, chatId, telegramId, address) {
   await ctx.bot.sendMessage(
     chatId,
     `Please confirm your request:\n\n🕒 ${fmtHourRange(startIso, endIso)}\n📍 ${address}\n` +
-      `💵 Base ${usd(await serviceFeeCents())} + travel (priced when a builder accepts)`,
+      `💵 Base ${usd(await serviceFeeCents())} + travel (priced when an Administrator accepts)`,
     {
       parse_mode: 'Markdown',
       reply_markup: {
@@ -132,8 +132,8 @@ export async function confirmRequest(ctx, chatId, telegramId) {
   await ctx.bot.sendMessage(
     chatId,
     `📝 *Request submitted* for ${fmtHourRange(startIso, endIso)}\n📍 ${address}\n\n` +
-      `A builder will accept your job, then we’ll send your payment link ` +
-      `(service ${usd(serviceFee)} + travel from the builder to you).`,
+      `An Administrator will accept your job, then we’ll send your payment link ` +
+      `(service ${usd(serviceFee)} + travel from the Administrator to you).`,
     { parse_mode: 'Markdown' }
   );
   await notifyExpertsOfOpenBooking(ctx, booking);

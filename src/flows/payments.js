@@ -489,7 +489,7 @@ export async function confirmBooking(ctx, booking, { auto = false } = {}) {
   if (!paid) return false; // already confirmed
   const when = fmtHourRange(paid.slot_start, paid.slot_end);
   try {
-    await ctx.bot.sendMessage(paid.customer_telegram_id, `✅ Payment confirmed! Your builder is booked for ${when}.`);
+    await ctx.bot.sendMessage(paid.customer_telegram_id, `✅ Payment confirmed! Your Administrator is booked for ${when}.`);
   } catch {
     /* ignore */
   }

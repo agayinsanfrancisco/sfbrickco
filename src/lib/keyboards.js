@@ -11,7 +11,7 @@ export function mainMenu({ isExpert, isAdmin } = {}) {
     ],
   ];
   if (isExpert) {
-    rows.push([{ text: '📋 My jobs (builder)', callback_data: 'exp:list' }]);
+    rows.push([{ text: '📋 My jobs (Administrator)', callback_data: 'exp:list' }]);
     rows.push([{ text: '📍 Update my address', callback_data: 'exp:addr' }]);
   }
   if (isAdmin) rows.push([{ text: '⚙️ Admin panel', callback_data: 'adm:menu' }]);
@@ -103,7 +103,7 @@ export function adminMenu() {
     reply_markup: {
       inline_keyboard: [
         [{ text: '👥 List users', callback_data: 'adm:users' }],
-        [{ text: '➕ Add builder', callback_data: 'adm:addexpert' }],
+        [{ text: '➕ Add Administrator', callback_data: 'adm:addexpert' }],
         [{ text: '➖ Remove user', callback_data: 'adm:remove' }],
         [{ text: '📋 Pending bookings', callback_data: 'adm:bookings' }],
         [{ text: '📦 Open orders', callback_data: 'adm:orders' }],
