@@ -23,6 +23,9 @@ import {
   setProductPrice,
   createProduct,
   createPromo,
+  listPendingApplications,
+  setApplicationStatus,
+  promoteToExpert,
 } from '../supabase.js';
 import { manualSurchargeCents, estimateBetween } from '../uber.js';
 import { adminMenu } from '../lib/keyboards.js';
@@ -425,6 +428,77 @@ export async function doAddSku(ctx, chatId, text) {
     });
   } catch (err) {
     await ctx.bot.sendMessage(chatId, `Couldn’t add it: ${err.message}`);
+  }
+}
+
+// ── Administrator applications (approval flow) ───────────────────────
+export async function showApplications(ctx, chatId, telegramId) {
+  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const apps = await listPendingApplications();
+  if (!apps.length) {
+    await ctx.bot.sendMessage(chatId, 'No pending Administrator applications.');
+    return;
+  }
+  for (const a of apps) {
+    await ctx.bot.sendMessage(
+      chatId,
+      `🧰 *Application*\n👤 ${a.name}${a.username ? ` (@${a.username})` : ''}\n` +
+        `🕑 ${a.hours}\n💲 ${a.rate}\n📍 ${a.base_address}`,
+      {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: '✅ Approve', callback_data: `adm:appok:${a.id}` },
+              { text: '❌ Reject', callback_data: `adm:appno:${a.id}` },
+            ],
+          ],
+        },
+      }
+    );
+  }
+}
+
+export async function approveApplication(ctx, chatId, telegramId, appId) {
+  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const app = await setApplicationStatus(appId, 'approved');
+  if (!app) {
+    await ctx.bot.sendMessage(chatId, 'That application was already handled.');
+    return;
+  }
+  const user = await promoteToExpert(app.telegram_id, app.base_address);
+  await ctx.bot.sendMessage(
+    chatId,
+    user
+      ? `✅ Approved *${app.name}* as an Administrator (base ${app.base_address}).`
+      : `✅ Approved — but ${app.name} must open the bot (/start) once before activation takes effect.`,
+    { parse_mode: 'Markdown' }
+  );
+  try {
+    await ctx.bot.sendMessage(
+      app.telegram_id,
+      '🎉 You’re approved as an Administrator! Tap /builder to set your availability and see open jobs.'
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+export async function rejectApplication(ctx, chatId, telegramId, appId) {
+  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const app = await setApplicationStatus(appId, 'rejected');
+  if (!app) {
+    await ctx.bot.sendMessage(chatId, 'That application was already handled.');
+    return;
+  }
+  await ctx.bot.sendMessage(chatId, `❌ Rejected ${app.name}.`);
+  try {
+    await ctx.bot.sendMessage(
+      app.telegram_id,
+      'Thanks for applying to be an Administrator — we’re not able to move forward at this time.'
+    );
+  } catch {
+    /* ignore */
   }
 }
 

@@ -13,6 +13,7 @@ import * as review from './flows/review.js';
 import * as payments from './flows/payments.js';
 import * as account from './flows/account.js';
 import * as wallet from './flows/wallet.js';
+import * as apply from './flows/apply.js';
 
 // Simple per-user rate limiter (#23): max N actions per sliding window.
 function makeRateLimiter({ max, windowMs }) {
@@ -76,6 +77,7 @@ export function createBot() {
     if (payload === 'shop') return shop.startShop(ctx, msg.chat.id);
     if (payload === 'book') return booking.startBooking(ctx, msg.chat.id);
     if (payload === 'wallet') return wallet.showWallet(ctx, msg.chat.id, from.id);
+    if (payload === 'apply') return apply.startApply(ctx, msg.chat.id);
     await sendMainMenu(msg.chat.id, from.id);
   });
 
@@ -84,6 +86,7 @@ export function createBot() {
   bot.onText(/^\/help/, (msg) => account.showHelp(ctx, msg.chat.id, msg.from.id));
   bot.onText(/^\/orders/, (msg) => account.showMyOrders(ctx, msg.chat.id, msg.from.id));
   bot.onText(/^\/(wallet|balance)/, (msg) => wallet.showWallet(ctx, msg.chat.id, msg.from.id));
+  bot.onText(/^\/apply/, (msg) => apply.startApply(ctx, msg.chat.id));
   bot.onText(/^\/forgetme/, (msg) =>
     bot.sendMessage(
       msg.chat.id,
@@ -190,6 +193,14 @@ export function createBot() {
         await wallet.receiveCustomAmount(ctx, chatId, msg.text.trim());
       } else if (s.flow === 'promo' && s.step === 'awaiting_code') {
         await payments.applyPromo(ctx, chatId, msg.text.trim());
+      } else if (s.flow === 'apply' && s.step === 'name') {
+        await apply.receiveName(ctx, chatId, msg.text.trim());
+      } else if (s.flow === 'apply' && s.step === 'hours') {
+        await apply.receiveHours(ctx, chatId, msg.text.trim());
+      } else if (s.flow === 'apply' && s.step === 'rate') {
+        await apply.receiveRate(ctx, chatId, msg.text.trim());
+      } else if (s.flow === 'apply' && s.step === 'address') {
+        await apply.receiveAddress(ctx, chatId, telegramId, msg.from.username, msg.text.trim());
       } else if (s.flow === 'admin' && s.step === 'awaiting_add_promo') {
         await admin.doAddPromo(ctx, chatId, msg.text);
       }
@@ -271,6 +282,8 @@ export function createBot() {
         const [coin, cents] = sliceAfter(data, 'wal:coin:').split(':');
         await wallet.payDeposit(ctx, chatId, telegramId, coin, Number.parseInt(cents, 10));
       }
+      // Apply to be an Administrator
+      else if (data === 'apply:start') await apply.startApply(ctx, chatId);
       // Account self-service
       else if (data === 'acct:orders') await account.showMyOrders(ctx, chatId, telegramId);
       else if (data.startsWith('acct:payo:'))
@@ -325,6 +338,11 @@ export function createBot() {
       else if (data.startsWith('adm:flag:'))
         await admin.toggleFlag(ctx, chatId, telegramId, sliceAfter(data, 'adm:flag:'));
       else if (data === 'adm:addpromo') await admin.promptAddPromo(ctx, chatId, telegramId);
+      else if (data === 'adm:apps') await admin.showApplications(ctx, chatId, telegramId);
+      else if (data.startsWith('adm:appok:'))
+        await admin.approveApplication(ctx, chatId, telegramId, sliceAfter(data, 'adm:appok:'));
+      else if (data.startsWith('adm:appno:'))
+        await admin.rejectApplication(ctx, chatId, telegramId, sliceAfter(data, 'adm:appno:'));
       else if (data.startsWith('adm:stock:'))
         await admin.promptSetStock(ctx, chatId, telegramId, sliceAfter(data, 'adm:stock:'));
       else if (data.startsWith('adm:assignto:')) {

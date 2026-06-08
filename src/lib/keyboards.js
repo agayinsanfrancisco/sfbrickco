@@ -9,6 +9,7 @@ export function mainMenu({ isExpert, isAdmin } = {}) {
       { text: '💰 Wallet', callback_data: 'wal:menu' },
       { text: '🧾 My orders', callback_data: 'acct:orders' },
     ],
+    [{ text: '🧰 Apply to be an Admin', callback_data: 'apply:start' }],
   ];
   if (isExpert) {
     rows.push([{ text: '📋 My jobs (Administrator)', callback_data: 'exp:list' }]);
@@ -103,6 +104,7 @@ export function adminMenu() {
     reply_markup: {
       inline_keyboard: [
         [{ text: '👥 List users', callback_data: 'adm:users' }],
+        [{ text: '🧰 Applications', callback_data: 'adm:apps' }],
         [{ text: '➕ Add Administrator', callback_data: 'adm:addexpert' }],
         [{ text: '➖ Remove user', callback_data: 'adm:remove' }],
         [{ text: '📋 Pending bookings', callback_data: 'adm:bookings' }],

@@ -143,6 +143,23 @@ create table if not exists expert_availability (
 create index if not exists expert_avail_idx on expert_availability (expert_id);
 alter table expert_availability enable row level security;
 
+-- ── Administrator applications (apply + approval) ────────────────────
+create table if not exists admin_applications (
+  id           uuid primary key default gen_random_uuid(),
+  telegram_id  bigint not null,
+  username     text,
+  name         text,
+  hours        text,
+  rate         text,
+  base_address text,
+  status       text not null default 'pending'
+                 check (status in ('pending', 'approved', 'rejected')),
+  created_at   timestamptz not null default now(),
+  reviewed_at  timestamptz
+);
+create index if not exists admin_apps_status_idx on admin_applications (status, created_at);
+alter table admin_applications enable row level security;
+
 -- ── Settings (admin-editable key/value) ──────────────────────────────
 create table if not exists settings (
   key        text primary key,

@@ -70,6 +70,49 @@ export async function applyBuilderInvite(user) {
   return updated || user;
 }
 
+// ── Administrator applications (apply + approval flow) ───────────────
+export async function createApplication({ telegramId, username, name, hours, rate, baseAddress }) {
+  const { data, error } = await supabase
+    .from('admin_applications')
+    .insert({ telegram_id: telegramId, username, name, hours, rate, base_address: baseAddress })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function listPendingApplications() {
+  const { data } = await supabase
+    .from('admin_applications')
+    .select('*')
+    .eq('status', 'pending')
+    .order('created_at', { ascending: true });
+  return data || [];
+}
+
+// Set status only while still pending so a double approve/reject is a no-op.
+export async function setApplicationStatus(id, status) {
+  const { data } = await supabase
+    .from('admin_applications')
+    .update({ status, reviewed_at: new Date().toISOString() })
+    .eq('id', id)
+    .eq('status', 'pending')
+    .select('*')
+    .maybeSingle();
+  return data;
+}
+
+// Promote an applicant's user row to an active Administrator (expert).
+export async function promoteToExpert(telegramId, baseAddress) {
+  const { data } = await supabase
+    .from('users')
+    .update({ role: 'expert', active: true, address: baseAddress })
+    .eq('telegram_id', telegramId)
+    .select('*')
+    .maybeSingle();
+  return data;
+}
+
 export async function addBuilderInvite(username) {
   const handle = String(username).replace(/^@/, '').trim().toLowerCase();
   if (!handle) return null;
