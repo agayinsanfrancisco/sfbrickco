@@ -323,6 +323,8 @@ export function createBot() {
       else if (data === 'exp:addr') await expert.promptSetAddress(ctx, chatId, telegramId);
       else if (data === 'exp:rate') await expert.promptSetRate(ctx, chatId, telegramId);
       else if (data === 'exp:avail') await expert.showAvailability(ctx, chatId, telegramId);
+      else if (data.startsWith('exp:avpreset:'))
+        await expert.applyAvailPreset(ctx, chatId, telegramId, sliceAfter(data, 'exp:avpreset:'), messageId);
       else if (data.startsWith('exp:av:')) {
         const [dow, blockKey] = sliceAfter(data, 'exp:av:').split(':');
         await expert.toggleAvailBlock(ctx, chatId, telegramId, Number.parseInt(dow, 10), blockKey, messageId);

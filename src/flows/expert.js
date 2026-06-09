@@ -184,6 +184,15 @@ export async function builderPortal(ctx, chatId, telegramId) {
 
 function availabilityKeyboard(windows) {
   const rows = [];
+  // One-tap presets for the common cases (set the whole week at once).
+  rows.push([
+    { text: '⚡ Weekdays 9–5', callback_data: 'exp:avpreset:weekdays' },
+    { text: '⚡ Every day 9–9', callback_data: 'exp:avpreset:everyday' },
+  ]);
+  rows.push([
+    { text: '⚡ Weekends 9–9', callback_data: 'exp:avpreset:weekends' },
+    { text: '🧹 Clear all', callback_data: 'exp:avpreset:clear' },
+  ]);
   // Mon–Sun order (more natural than Sun-first for a work week).
   for (const dow of [1, 2, 3, 4, 5, 6, 0]) {
     const row = [{ text: DOW_NAMES[dow], callback_data: 'noop' }];
@@ -197,16 +206,52 @@ function availabilityKeyboard(windows) {
     rows.push(row);
   }
   rows.push([{ text: '🚫 Block a specific time off', callback_data: 'exp:off' }]);
-  rows.push([
-    { text: '🧹 Clear all', callback_data: 'exp:avclear' },
-    { text: '✅ Done', callback_data: 'exp:avdone' },
-  ]);
+  rows.push([{ text: '✅ Done', callback_data: 'exp:avdone' }]);
   return { reply_markup: { inline_keyboard: rows } };
+}
+
+// Build the windows for a one-tap preset. Blocks: Morning 9–13, Afternoon
+// 13–17, Evening 17–21. "Weekdays 9–5" = Mon–Fri Morning+Afternoon; the
+// "every day"/"weekends" presets include all three blocks (→ 9–9).
+function presetWindows(preset) {
+  const day = BLOCKS.filter((b) => b.key !== 'pm'); // Morning + Afternoon → 9–17
+  const all = BLOCKS; // 9–21
+  const make = (dows, blocks) =>
+    dows.flatMap((dow) => blocks.map((b) => ({ dow, start_hour: b.start, end_hour: b.end })));
+  switch (preset) {
+    case 'weekdays':
+      return make([1, 2, 3, 4, 5], day);
+    case 'everyday':
+      return make([0, 1, 2, 3, 4, 5, 6], all);
+    case 'weekends':
+      return make([0, 6], all);
+    case 'clear':
+      return [];
+    default:
+      return null;
+  }
+}
+
+export async function applyAvailPreset(ctx, chatId, telegramId, preset, messageId) {
+  const user = await ensureExpert(ctx, chatId, telegramId);
+  if (!user) return;
+  const windows = presetWindows(preset);
+  if (windows === null) return;
+  await setExpertAvailability(user.id, windows);
+  try {
+    await ctx.bot.editMessageReplyMarkup(availabilityKeyboard(windows).reply_markup, {
+      chat_id: chatId,
+      message_id: messageId,
+    });
+  } catch {
+    await showAvailability(ctx, chatId, telegramId);
+  }
 }
 
 const AVAIL_HEADER =
   '🗓️ *Your weekly hours* (Pacific)\n' +
-  'Tap a block to turn it on/off — customers can only book you during your ✅ hours.\n' +
+  'Use a ⚡ preset to set everything at once, then tap any block to fine-tune. ' +
+  'Customers can only book you during your ✅ hours.\n' +
   '_Leave everything off to be offered every job._\n\n' +
   'Morning 9–1 · Afternoon 1–5 · Evening 5–9';
 
