@@ -574,27 +574,25 @@ export async function confirmBooking(ctx, booking, { auto = false } = {}) {
   if (!paid) return false; // already confirmed
   const when = fmtHourRange(paid.slot_start, paid.slot_end);
   try {
-    await ctx.bot.sendMessage(paid.customer_telegram_id, `✅ Payment confirmed! Your Administrator is booked for ${when}.`);
+    await ctx.bot.sendMessage(
+      paid.customer_telegram_id,
+      `✅ Payment confirmed! Your Administrator is booked for ${when}.\nNeed to share gate codes or timing? Message them right here — your contact stays private.`,
+      { reply_markup: { inline_keyboard: [[{ text: '💬 Message your Administrator', callback_data: `relay:customer:${paid.id}` }]] } }
+    );
   } catch {
     /* ignore */
   }
-  // Notify the assigned builder that their job is paid/confirmed. Customer
-  // contact (name + handle) is revealed only now, post-payment, so they can
-  // coordinate the visit — not before payment.
+  // Notify the assigned builder. On the relay branch we DON'T share the
+  // customer's handle — they message in-bot (privacy + on-platform).
   if (paid.expert_id) {
     const builder = await getUserById(paid.expert_id);
     if (builder) {
-      const cust = await getUserByTelegramId(paid.customer_telegram_id);
-      const contact = cust
-        ? `\n👤 ${cust.full_name || 'Customer'}${cust.username ? ` (@${cust.username})` : ''}${
-            paid.contact_phone ? ` · 📞 ${paid.contact_phone}` : ''
-          }`
-        : '';
       try {
         await ctx.bot.sendMessage(
           builder.telegram_id,
-          `💰 Payment received — your job for ${when} at ${paid.customer_address} is confirmed.${contact}` +
-            `\n\nPlease coordinate through SF Brick Company; per your agreement, off-platform bookings aren’t allowed.`
+          `💰 Payment received — your job for ${when} at ${paid.customer_address} is confirmed.\n\n` +
+            `Coordinate with the customer through the bot below (their contact stays private; off-platform bookings aren’t allowed per your agreement).`,
+          { reply_markup: { inline_keyboard: [[{ text: '💬 Message your customer', callback_data: `relay:admin:${paid.id}` }]] } }
         );
       } catch {
         /* ignore */
