@@ -496,13 +496,19 @@ export async function confirmOrder(ctx, order, { auto = false } = {}) {
   if (!paid) return false; // already confirmed
   logEvent(order.telegram_id, 'order_paid', { id: order.id, total: orderTotalCents(order) });
 
-  // Brick-buy wallet bonus (#incentive): contingent on a qualifying purchase and
-  // only on the customer's FIRST one — never paid to non-buyers or repeat buyers.
+  // Brick-buy wallet bonus (final model): gated on a qualifying 6-pack purchase
+  // (a line item of qty ≥ the qualifying qty), paid ONCE per buyer and FLAT —
+  // so multi-pack buyers widen the margin while bonus cost stays fixed. Never
+  // paid to non-buyers or repeat buyers, and never larger than the purchase.
   const bonusCents = await getIntSetting('brick_bonus_cents', 0);
-  const bonusMin = await getIntSetting('brick_bonus_min_cents', 0);
+  const qualifyingQty = await getIntSetting('bonus_qualifying_qty', 6);
+  const boughtSixPack = order.items?.length
+    ? order.items.some((i) => (i.qty || 0) >= qualifyingQty)
+    : (order.qty || 0) >= qualifyingQty;
   if (
     bonusCents > 0 &&
-    (order.amount_cents || 0) >= bonusMin &&
+    boughtSixPack &&
+    (order.amount_cents || 0) >= bonusCents &&
     !(await hasReceivedBonus(order.telegram_id))
   ) {
     try {
