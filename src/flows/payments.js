@@ -27,6 +27,7 @@ import {
   setOrderPromo,
   recordOrderWaiver,
   recordBookingWaiver,
+  hasReceivedBonus,
 } from '../supabase.js';
 
 // Crypto-only payments (BTC/LTC). With an xpub configured, each order gets a
@@ -495,11 +496,15 @@ export async function confirmOrder(ctx, order, { auto = false } = {}) {
   if (!paid) return false; // already confirmed
   logEvent(order.telegram_id, 'order_paid', { id: order.id, total: orderTotalCents(order) });
 
-  // Brick-buy wallet bonus (#incentive): contingent on a qualifying purchase —
-  // only ever paid to actual buyers. Flat credit on orders at/above a threshold.
+  // Brick-buy wallet bonus (#incentive): contingent on a qualifying purchase and
+  // only on the customer's FIRST one — never paid to non-buyers or repeat buyers.
   const bonusCents = await getIntSetting('brick_bonus_cents', 0);
   const bonusMin = await getIntSetting('brick_bonus_min_cents', 0);
-  if (bonusCents > 0 && (order.amount_cents || 0) >= bonusMin) {
+  if (
+    bonusCents > 0 &&
+    (order.amount_cents || 0) >= bonusMin &&
+    !(await hasReceivedBonus(order.telegram_id))
+  ) {
     try {
       const bal = await creditBalance(order.telegram_id, bonusCents, {
         kind: 'bonus',

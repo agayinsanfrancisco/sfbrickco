@@ -955,6 +955,17 @@ export async function debitBalance(telegramId, amountCents, { refType = null, re
   return data ?? null;
 }
 
+// Has this customer ever received a wallet bonus? (first-purchase bonus guard)
+export async function hasReceivedBonus(telegramId) {
+  const { data } = await supabase
+    .from('ledger')
+    .select('id')
+    .eq('telegram_id', telegramId)
+    .eq('kind', 'bonus')
+    .limit(1);
+  return (data || []).length > 0;
+}
+
 export async function listLedger(telegramId, limit = 10) {
   const { data } = await supabase
     .from('ledger')
