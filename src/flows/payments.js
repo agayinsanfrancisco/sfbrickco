@@ -1,6 +1,6 @@
 import { config, isAdminId } from '../config.js';
 import * as crypto from '../crypto.js';
-import { usd, fmtHourRange, shortRef, orderItemsSummary } from '../lib/format.js';
+import { usd, fmtHourRange, shortRef, orderItemsSummary, mdEscape } from '../lib/format.js';
 import { orderTotalCents, discountFor } from '../lib/money.js';
 import {
   getOrder,
@@ -47,14 +47,14 @@ const WAIVER_ORDER =
   'By tapping *“I agree”* you acknowledge and agree that:\n' +
   '• Our parts are independent, third-party accessories, sold strictly *“AS IS”* and *“AS AVAILABLE”* with no warranties of any kind, express or implied (including merchantability or fitness for a particular purpose).\n' +
   '• You assume *all risks* arising from the purchase, handling, and use of the parts, including choking or other hazards, injury, property damage, or loss.\n' +
-  '• To the maximum extent permitted by law, SF Brick Company, @redbluebrick_bot, and their owners and operators disclaim *all liability*, and you agree to *indemnify and hold them harmless* from any claim, damage, or expense arising from your order.\n' +
+  '• To the maximum extent permitted by law, SF Brick Company, @redbluebrick\\_bot, and their owners and operators disclaim *all liability*, and you agree to *indemnify and hold them harmless* from any claim, damage, or expense arising from your order.\n' +
   '• You are at least 18 years old and agree to our Terms.\n\n' +
   'Do you agree?';
 
 const WAIVER_BOOKING =
   '⚠️ *Before you pay — please read carefully*\n\n' +
   'By tapping *“I agree”* you acknowledge and agree that:\n' +
-  '• Administrators are *independent third-party contractors*. They are NOT employees, agents, partners, or affiliates of SF Brick Company, @redbluebrick_bot, or their owners/operators, who act solely as a venue connecting you with the Administrator and are not a party to, and bear no responsibility for, the session or the Administrator’s conduct.\n' +
+  '• Administrators are *independent third-party contractors*. They are NOT employees, agents, partners, or affiliates of SF Brick Company, @redbluebrick\\_bot, or their owners/operators, who act solely as a venue connecting you with the Administrator and are not a party to, and bear no responsibility for, the session or the Administrator’s conduct.\n' +
   '• You assume *all risks* of an in-person, on-site session — including any bodily injury, property damage, theft, or loss — whether arising from negligence or otherwise.\n' +
   '• The service is provided *“AS IS”*. To the maximum extent permitted by law, SF Brick Company and its owners/operators disclaim *all liability* and all warranties, and you agree to *indemnify, defend, and hold them harmless* from any and all claims, damages, or expenses arising from your booking.\n' +
   '• You are at least 18, you authorize entry to the address you provided, and you enter this agreement knowingly and voluntarily.\n\n' +
@@ -526,14 +526,14 @@ export async function confirmOrder(ctx, order, { auto = false } = {}) {
     /* ignore */
   }
   const itemSummary = order.items?.length
-    ? order.items.map((i) => `${i.qty}× ${i.name}`).join(', ')
-    : `${order.qty} × ${order.sku}`;
+    ? order.items.map((i) => `${i.qty}× ${mdEscape(i.name)}`).join(', ')
+    : `${order.qty} × ${mdEscape(order.sku)}`;
   const detail =
     `📦 *Paid order ${shortRef(order.id)} — ready to dispatch*\n` +
     `${itemSummary}\n` +
-    `📍 ${order.delivery_address}\n` +
-    `📞 ${order.contact_phone || '—'}${order.contact_handle ? ` (@${order.contact_handle})` : ''}` +
-    `${order.notes ? `\n📝 ${order.notes}` : ''}\n` +
+    `📍 ${mdEscape(order.delivery_address)}\n` +
+    `📞 ${mdEscape(order.contact_phone) || '—'}${order.contact_handle ? ` (@${mdEscape(order.contact_handle)})` : ''}` +
+    `${order.notes ? `\n📝 ${mdEscape(order.notes)}` : ''}\n` +
     `Delivery fee ${usd(order.delivery_fee_cents)} · paid ${auto ? 'auto/on-chain' : 'manual'}`;
   for (const adminId of config.adminIds) {
     try {
@@ -628,8 +628,8 @@ export async function adminDispatch(ctx, chatId, telegramId, orderId) {
 
   await ctx.bot.sendMessage(
     chatId,
-    `🚚 *Dispatching ${shortRef(o.id)} — ${orderItemsSummary(o)}*\n📍 ${o.delivery_address}\n📞 ${o.contact_phone || '—'}` +
-      `${o.notes ? `\n📝 ${o.notes}` : ''}\n\nRequest a courier to this address and it’s on its way.`,
+    `🚚 *Dispatching ${shortRef(o.id)} — ${mdEscape(orderItemsSummary(o))}*\n📍 ${mdEscape(o.delivery_address)}\n📞 ${mdEscape(o.contact_phone) || '—'}` +
+      `${o.notes ? `\n📝 ${mdEscape(o.notes)}` : ''}\n\nRequest a courier to this address and it’s on its way.`,
     {
       parse_mode: 'Markdown',
       reply_markup: { inline_keyboard: [[{ text: '📬 Mark delivered', callback_data: `pm:deliv:${o.id}` }]] },

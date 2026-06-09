@@ -2,6 +2,12 @@ export function usd(cents) {
   return `$${(cents / 100).toFixed(2)}`;
 }
 
+// Escape Telegram legacy-Markdown special chars in interpolated user text
+// (addresses, names) so a stray _ or * can't break message parsing.
+export function mdEscape(s) {
+  return String(s ?? '').replace(/([_*`[\]])/g, '\\$1');
+}
+
 // Human-friendly order/booking reference from a UUID, e.g. "SFB-3F9A2C".
 export function shortRef(id) {
   return `SFB-${String(id).replace(/-/g, '').slice(0, 6).toUpperCase()}`;

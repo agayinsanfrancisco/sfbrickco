@@ -12,7 +12,7 @@ import {
 } from '../supabase.js';
 import { upcomingDays, hourlySlots, isCovered } from '../lib/slots.js';
 import { daysKeyboard, hoursKeyboard } from '../lib/keyboards.js';
-import { usd, fmtHourRange } from '../lib/format.js';
+import { usd, fmtHourRange, mdEscape } from '../lib/format.js';
 import { getIntSetting, getBoolSetting } from '../lib/settings.js';
 import { presentWaiver } from './payments.js';
 
@@ -168,7 +168,7 @@ export async function receiveZip(ctx, chatId, telegramId, zip) {
     : `💵 *${usd(total)}* (${usd(fee)} session + ${usd(surcharge)} travel)`;
   await ctx.bot.sendMessage(
     chatId,
-    `Please confirm:\n\n👤 ${s.adminName}\n🕒 ${fmtHourRange(startIso, endIso)}\n📍 ${address}\n${costLine}`,
+    `Please confirm:\n\n👤 ${mdEscape(s.adminName)}\n🕒 ${fmtHourRange(startIso, endIso)}\n📍 ${mdEscape(address)}\n${costLine}`,
     {
       parse_mode: 'Markdown',
       reply_markup: {
@@ -230,7 +230,7 @@ export async function confirmRequest(ctx, chatId, telegramId) {
 
   await ctx.bot.sendMessage(
     chatId,
-    `📝 *Booked ${chosenName}* for ${fmtHourRange(startIso, endIso)}\n📍 ${address}\nTotal *${usd(total)}*.`,
+    `📝 *Booked ${mdEscape(chosenName)}* for ${fmtHourRange(startIso, endIso)}\n📍 ${mdEscape(address)}\nTotal *${usd(total)}*.`,
     { parse_mode: 'Markdown' }
   );
   await presentWaiver(ctx, chatId, 'b', booking.id);
