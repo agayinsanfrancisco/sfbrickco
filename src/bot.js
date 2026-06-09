@@ -15,6 +15,7 @@ import * as account from './flows/account.js';
 import * as wallet from './flows/wallet.js';
 import * as apply from './flows/apply.js';
 import * as relay from './flows/relay.js';
+import * as testmode from './flows/testmode.js';
 
 // Simple per-user rate limiter (#23): max N actions per sliding window.
 function makeRateLimiter({ max, windowMs }) {
@@ -346,6 +347,16 @@ export function createBot() {
       else if (data === 'adm:menu') await admin.showMenu(ctx, chatId, telegramId);
       else if (data === 'adm:users') await admin.showUsers(ctx, chatId, telegramId);
       else if (data === 'adm:repeat') await admin.showRepeatCustomers(ctx, chatId, telegramId);
+      else if (data === 'adm:test') await testmode.showTestMode(ctx, chatId, telegramId);
+      else if (data === 'adm:test:cust') await testmode.setMode(ctx, chatId, telegramId, 'customer');
+      else if (data === 'adm:test:build') await testmode.setMode(ctx, chatId, telegramId, 'expert');
+      else if (data === 'adm:test:owner') await testmode.setMode(ctx, chatId, telegramId, 'admin');
+      else if (data === 'adm:test:pay') await testmode.showSimPayments(ctx, chatId, telegramId);
+      else if (data === 'adm:test:wallet') await testmode.topUpTestWallet(ctx, chatId, telegramId);
+      else if (data.startsWith('adm:test:payo:'))
+        await testmode.simulateOrderPay(ctx, chatId, telegramId, sliceAfter(data, 'adm:test:payo:'));
+      else if (data.startsWith('adm:test:payb:'))
+        await testmode.simulateBookingPay(ctx, chatId, telegramId, sliceAfter(data, 'adm:test:payb:'));
       else if (data === 'adm:addexpert') await admin.promptAddExpert(ctx, chatId, telegramId);
       else if (data === 'adm:remove') await admin.promptRemove(ctx, chatId, telegramId);
       else if (data === 'adm:bookings') await admin.showBookings(ctx, chatId, telegramId);

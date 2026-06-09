@@ -131,6 +131,7 @@ export function adminMenu() {
           { text: '🎚️ Features', callback_data: 'adm:features' },
           { text: '📣 Broadcast', callback_data: 'adm:broadcast' },
         ],
+        [{ text: '🧪 Test mode (view as / simulate pay)', callback_data: 'adm:test' }],
       ],
     },
   };
