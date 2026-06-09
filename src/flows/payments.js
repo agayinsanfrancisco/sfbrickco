@@ -2,7 +2,6 @@ import { config, isAdminId } from '../config.js';
 import * as crypto from '../crypto.js';
 import { usd, fmtHourRange, shortRef, orderItemsSummary } from '../lib/format.js';
 import { orderTotalCents, discountFor } from '../lib/money.js';
-import { getIntSetting } from '../lib/settings.js';
 import {
   getOrder,
   markOrderPaid,
@@ -27,7 +26,6 @@ import {
   setOrderPromo,
   recordOrderWaiver,
   recordBookingWaiver,
-  hasReceivedBonus,
 } from '../supabase.js';
 
 // Crypto-only payments (BTC/LTC). With an xpub configured, each order gets a
@@ -496,36 +494,11 @@ export async function confirmOrder(ctx, order, { auto = false } = {}) {
   if (!paid) return false; // already confirmed
   logEvent(order.telegram_id, 'order_paid', { id: order.id, total: orderTotalCents(order) });
 
-  // Brick-buy wallet bonus (final model): gated on a qualifying 6-pack purchase
-  // (a line item of qty ≥ the qualifying qty), paid ONCE per buyer and FLAT —
-  // so multi-pack buyers widen the margin while bonus cost stays fixed. Never
-  // paid to non-buyers or repeat buyers, and never larger than the purchase.
-  const bonusCents = await getIntSetting('brick_bonus_cents', 0);
-  const qualifyingQty = await getIntSetting('bonus_qualifying_qty', 6);
-  const boughtSixPack = order.items?.length
-    ? order.items.some((i) => (i.qty || 0) >= qualifyingQty)
-    : (order.qty || 0) >= qualifyingQty;
-  if (
-    bonusCents > 0 &&
-    boughtSixPack &&
-    (order.amount_cents || 0) >= bonusCents &&
-    !(await hasReceivedBonus(order.telegram_id))
-  ) {
-    try {
-      const bal = await creditBalance(order.telegram_id, bonusCents, {
-        kind: 'bonus',
-        refType: 'order',
-        refId: order.id,
-      });
-      await ctx.bot.sendMessage(
-        order.telegram_id,
-        `🎁 You earned a *${usd(bonusCents)}* wallet bonus on this order! Balance: *${usd(bal)}*.`,
-        { parse_mode: 'Markdown' }
-      );
-    } catch {
-      /* ignore */
-    }
-  }
+  // NOTE: the wallet bonus is no longer paid on the order. Buying a qualifying
+  // 6-pack only *unlocks* eligibility; the bonus (a % of the deposit, capped,
+  // first deposit only) is credited when the customer tops up their wallet —
+  // see settleDeposit() in watcher.js.
+
   // Decrement stock per line item (cart) or the single SKU; deactivate + alert
   // admins on any item hitting zero (#14, #17).
   const lines = order.items?.length ? order.items : [{ sku: order.sku, qty: order.qty, name: order.sku }];

@@ -9,8 +9,11 @@ import {
   markDepositCredited,
   expireDeposit,
   creditBalance,
+  hasReceivedBonus,
+  hasQualifyingBrickPurchase,
 } from './supabase.js';
 import { confirmOrder, confirmBooking } from './flows/payments.js';
+import { getIntSetting } from './lib/settings.js';
 import { usd } from './lib/format.js';
 
 // Poll public explorers for payments to each item's derived address and
@@ -105,7 +108,7 @@ async function settleDeposit(ctx, dep) {
     blockHeight: tx?.blockHeight ?? null,
   });
   if (!marked) return; // already credited (idempotent)
-  const balance = await creditBalance(dep.telegram_id, credited, {
+  let balance = await creditBalance(dep.telegram_id, credited, {
     kind: 'deposit',
     refType: 'deposit',
     refId: dep.id,
@@ -118,6 +121,39 @@ async function settleDeposit(ctx, dep) {
     );
   } catch {
     /* customer hasn't opened the bot */
+  }
+
+  // Deposit bonus: unlocked by a prior qualifying brick purchase (the 6-pack
+  // gate), paid as a % of THIS deposit, capped, and only on the customer's
+  // FIRST deposit (once per customer via the bonus-ledger guard).
+  try {
+    const pct = await getIntSetting('deposit_bonus_pct', 0);
+    const capCents = await getIntSetting('deposit_bonus_cap_cents', 0);
+    const qualifyingQty = await getIntSetting('bonus_qualifying_qty', 6);
+    if (
+      pct > 0 &&
+      !(await hasReceivedBonus(dep.telegram_id)) &&
+      (await hasQualifyingBrickPurchase(dep.telegram_id, qualifyingQty))
+    ) {
+      let bonus = Math.round((credited * pct) / 100);
+      if (capCents > 0) bonus = Math.min(bonus, capCents);
+      if (bonus > 0) {
+        balance = await creditBalance(dep.telegram_id, bonus, {
+          kind: 'bonus',
+          refType: 'deposit',
+          refId: dep.id,
+        });
+        await ctx.bot.sendMessage(
+          dep.telegram_id,
+          `🎁 First-deposit bonus — *${usd(bonus)}* added (${pct}% of your deposit${
+            capCents > 0 ? `, up to ${usd(capCents)}` : ''
+          }). Balance: *${usd(balance)}*.`,
+          { parse_mode: 'Markdown' }
+        );
+      }
+    }
+  } catch {
+    /* bonus is best-effort; never block a credited deposit */
   }
 }
 

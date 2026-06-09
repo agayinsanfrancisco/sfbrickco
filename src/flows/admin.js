@@ -336,18 +336,22 @@ export async function doRefund(ctx, chatId, text) {
 // ── Editable fees (#44) ──────────────────────────────────────────────
 export async function showFees(ctx, chatId, telegramId) {
   if (!ensureAdmin(ctx, chatId, telegramId)) return;
-  const [service, base, perMile, bonus, qty] = await Promise.all([
+  const [service, base, perMile, pct, cap, qty] = await Promise.all([
     getIntSetting('service_fee_cents', config.pricing.serviceFeeCents),
     getIntSetting('uber_base_cents', config.uber.baseCents),
     getIntSetting('uber_per_mile_cents', config.uber.perMileCents),
-    getIntSetting('brick_bonus_cents', 0),
+    getIntSetting('deposit_bonus_pct', 0),
+    getIntSetting('deposit_bonus_cap_cents', 0),
     getIntSetting('bonus_qualifying_qty', 6),
   ]);
-  const bonusLine = bonus > 0 ? `${usd(bonus)} on a first ${qty}-pack buy (once/customer)` : 'off';
+  const bonusLine =
+    pct > 0
+      ? `${pct}% of first deposit${cap > 0 ? `, up to ${usd(cap)}` : ''} — unlocked by a ${qty}-pack (once/customer)`
+      : 'off';
   await ctx.bot.sendMessage(
     chatId,
     `💲 *Fees*\n• Service fee: ${usd(service)}\n• Travel base: ${usd(base)}\n• Per mile: ${usd(perMile)}\n` +
-      `• 🎁 Brick-buy bonus: ${bonusLine}`,
+      `• 🎁 Deposit bonus: ${bonusLine}`,
     {
       parse_mode: 'Markdown',
       reply_markup: {
@@ -355,25 +359,39 @@ export async function showFees(ctx, chatId, telegramId) {
           [{ text: 'Edit service fee', callback_data: 'adm:fee:service' }],
           [{ text: 'Edit travel base', callback_data: 'adm:fee:base' }],
           [{ text: 'Edit per-mile', callback_data: 'adm:fee:permile' }],
-          [{ text: '🎁 Edit bonus amount', callback_data: 'adm:fee:brickbonus' }],
+          [{ text: '🎁 Edit bonus %', callback_data: 'adm:fee:bonuspct' }],
+          [{ text: '🎁 Edit bonus cap', callback_data: 'adm:fee:bonuscap' }],
+          [{ text: '🎁 Edit unlock pack size', callback_data: 'adm:fee:bonusqty' }],
         ],
       },
     }
   );
 }
 
+// Dollar-denominated settings (input in dollars, stored as cents).
 const FEE_KEYS = {
   service: 'service_fee_cents',
   base: 'uber_base_cents',
   permile: 'uber_per_mile_cents',
-  brickbonus: 'brick_bonus_cents',
+  bonuscap: 'deposit_bonus_cap_cents',
+};
+
+// Raw-integer settings (input stored verbatim — a percent or a count).
+const INT_KEYS = {
+  bonuspct: 'deposit_bonus_pct',
+  bonusqty: 'bonus_qualifying_qty',
 };
 
 export async function promptSetFee(ctx, chatId, telegramId, which) {
   if (!ensureAdmin(ctx, chatId, telegramId)) return;
-  if (!FEE_KEYS[which]) return;
+  if (!FEE_KEYS[which] && !INT_KEYS[which]) return;
   ctx.sessions.set(chatId, { flow: 'admin', step: 'awaiting_fee', data: { which } });
-  await ctx.bot.sendMessage(chatId, `Enter the new amount in dollars for *${which}* (e.g. 50):`, {
+  const unit = INT_KEYS[which]
+    ? which === 'bonuspct'
+      ? 'a percentage (e.g. 50)'
+      : 'a whole number (e.g. 6)'
+    : 'dollars (e.g. 50)';
+  await ctx.bot.sendMessage(chatId, `Enter the new value for *${which}* — ${unit}:`, {
     parse_mode: 'Markdown',
   });
 }
@@ -382,16 +400,22 @@ export async function doSetFee(ctx, chatId, text) {
   const session = ctx.sessions.get(chatId);
   const which = session?.data?.which;
   ctx.sessions.delete(chatId);
-  const key = FEE_KEYS[which];
-  if (!key) return;
-  const dollars = Number.parseFloat(String(text).replace(/[^0-9.]/g, ''));
-  if (Number.isNaN(dollars) || dollars < 0) {
-    await ctx.bot.sendMessage(chatId, 'Please enter a valid non-negative amount.');
+  const raw = Number.parseFloat(String(text).replace(/[^0-9.]/g, ''));
+  if (Number.isNaN(raw) || raw < 0) {
+    await ctx.bot.sendMessage(chatId, 'Please enter a valid non-negative number.');
     return;
   }
-  await setSetting(key, Math.round(dollars * 100));
+  if (INT_KEYS[which]) {
+    const value = Math.round(raw);
+    await setSetting(INT_KEYS[which], value);
+    invalidateSettings();
+    await ctx.bot.sendMessage(chatId, `✅ ${which} set to ${value}.`);
+    return;
+  }
+  if (!FEE_KEYS[which]) return;
+  await setSetting(FEE_KEYS[which], Math.round(raw * 100));
   invalidateSettings();
-  await ctx.bot.sendMessage(chatId, `✅ ${which} set to ${usd(Math.round(dollars * 100))}.`);
+  await ctx.bot.sendMessage(chatId, `✅ ${which} set to ${usd(Math.round(raw * 100))}.`);
 }
 
 // ── Price editing + add SKU (#29) ────────────────────────────────────

@@ -988,6 +988,22 @@ export async function hasReceivedBonus(telegramId) {
   return (data || []).length > 0;
 }
 
+// True if the customer has any PAID order that included a qualifying brick pack
+// (a cart line item — or a single-item order qty — of at least `minQty`). This
+// is what unlocks the deposit bonus: the "buy a 6-pack" gate.
+export async function hasQualifyingBrickPurchase(telegramId, minQty) {
+  const { data } = await supabase
+    .from('orders')
+    .select('qty, items')
+    .eq('telegram_id', telegramId)
+    .eq('status', 'paid');
+  return (data || []).some((o) =>
+    Array.isArray(o.items) && o.items.length
+      ? o.items.some((i) => (i.qty || 0) >= minQty)
+      : (o.qty || 0) >= minQty
+  );
+}
+
 export async function listLedger(telegramId, limit = 10) {
   const { data } = await supabase
     .from('ledger')
