@@ -262,16 +262,33 @@ export async function cancelBookingById(id) {
 }
 
 // Most recent delivery address this customer used (#42).
+// Most recent address the customer has used — across orders AND bookings — so
+// the shop can offer it instead of making them retype (e.g. right after a
+// booking). Returns the newer of the two.
 export async function lastDeliveryAddress(telegramId) {
-  const { data } = await supabase
-    .from('orders')
-    .select('delivery_address')
-    .eq('telegram_id', telegramId)
-    .not('delivery_address', 'is', null)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  return data?.delivery_address || null;
+  const [{ data: o }, { data: b }] = await Promise.all([
+    supabase
+      .from('orders')
+      .select('delivery_address, created_at')
+      .eq('telegram_id', telegramId)
+      .not('delivery_address', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabase
+      .from('bookings')
+      .select('customer_address, created_at')
+      .eq('customer_telegram_id', telegramId)
+      .not('customer_address', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+  const cands = [];
+  if (o?.delivery_address) cands.push({ addr: o.delivery_address, at: o.created_at });
+  if (b?.customer_address) cands.push({ addr: b.customer_address, at: b.created_at });
+  cands.sort((x, y) => (x.at < y.at ? 1 : -1));
+  return cands[0]?.addr || null;
 }
 
 // Attach the chosen coin + derived address + quoted amount + locked rate +

@@ -35,15 +35,23 @@ export async function startShop(ctx, chatId) {
     return;
   }
   const rows = products.map((p) => [{ text: p.name, callback_data: `shop:p:${p.sku}` }]);
+  const session = ctx.sessions.get(chatId) || {};
   const cart = getCart(ctx, chatId);
   if (cart.length) rows.push([{ text: `🛒 View cart (${cart.length})`, callback_data: 'shop:cart' }]);
   rows.push([{ text: '🛠️ Hire an Admin', callback_data: 'shop:addadmin' }]);
-  const pct = await getIntSetting('deposit_bonus_pct', 0);
-  const cap = await getIntSetting('deposit_bonus_cap_cents', 0);
-  const bonusQty = await getIntSetting('bonus_qualifying_qty', 6);
-  const offer = pct > 0
-    ? `\n🎁 Grab a *${bonusQty}-pack* to unlock a *${pct}% bonus*${cap > 0 ? ` (up to ${usd(cap)})` : ''} on your first wallet deposit!`
-    : '';
+  // One incentive at a time: if they arrived via the post-booking upsell, show
+  // only that discount. Otherwise show the standing first-deposit bonus.
+  let offer = '';
+  if (session.upsellPercent) {
+    offer = `\n🎉 *${session.upsellPercent}% off* these parts is locked in — it’s applied automatically at checkout.`;
+  } else {
+    const pct = await getIntSetting('deposit_bonus_pct', 0);
+    const cap = await getIntSetting('deposit_bonus_cap_cents', 0);
+    const bonusQty = await getIntSetting('bonus_qualifying_qty', 6);
+    if (pct > 0) {
+      offer = `\n🎁 Grab a *${bonusQty}-pack* to unlock a *${pct}% bonus*${cap > 0 ? ` (up to ${usd(cap)})` : ''} on your first wallet deposit!`;
+    }
+  }
   await ctx.bot.sendMessage(
     chatId,
     `🧱 *Shop*\nTap a product to see pack sizes & prices, then add it to your cart.${offer}`,
