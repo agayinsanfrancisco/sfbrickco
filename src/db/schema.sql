@@ -200,8 +200,8 @@ create table if not exists ledger (
   telegram_id   bigint not null,
   delta_cents   integer not null,                 -- +credit / −debit
   kind          text not null
-                  check (kind in ('deposit', 'purchase', 'refund', 'adjustment')),
-  ref_type      text,                             -- 'order' | 'booking' | 'deposit'
+                  check (kind in ('deposit', 'purchase', 'refund', 'adjustment', 'bonus')),
+  ref_type      text,                             -- 'order' | 'booking' | 'deposit' | 'seed'
   ref_id        uuid,
   balance_after integer not null,
   created_at    timestamptz not null default now()
