@@ -7,12 +7,12 @@ import {
   getBooking,
   listExperts,
   setUserAddress,
+  setUserRate,
   listBookingsForExpert,
   expertRatingSummary,
   getExpertAvailability,
   setExpertAvailability,
 } from '../supabase.js';
-import { estimateBetween } from '../uber.js';
 import { expertJobKeyboard } from '../lib/keyboards.js';
 import { usd, fmtHourRange } from '../lib/format.js';
 import { isCovered } from '../lib/slots.js';
@@ -73,6 +73,42 @@ export async function doSetAddress(ctx, chatId, telegramId, text) {
   );
 }
 
+// Per-Administrator rate (what the customer pays); we take a platform fee.
+export async function promptSetRate(ctx, chatId, telegramId) {
+  const user = await ensureExpert(ctx, chatId, telegramId);
+  if (!user) return;
+  ctx.sessions.set(chatId, { flow: 'expert', step: 'awaiting_rate' });
+  const fee = config.pricing.platformFeePct;
+  const current = user.rate_cents != null ? `\nCurrent: ${usd(user.rate_cents)}` : '';
+  const exampleNet = Math.round((4000 * (100 - fee)) / 100);
+  await ctx.bot.sendMessage(
+    chatId,
+    `💲 *Set your rate* per 1-hour session — this is what the customer pays.${current}\n\n` +
+      `⚠️ We take a *${fee}% platform fee*, so you keep *${100 - fee}%*. ` +
+      `For example, at $40 you’d earn ${usd(exampleNet)}.\n\nSend your price in dollars:`,
+    { parse_mode: 'Markdown', reply_markup: { force_reply: true, input_field_placeholder: '40' } }
+  );
+}
+
+export async function doSetRate(ctx, chatId, telegramId, text) {
+  ctx.sessions.delete(chatId);
+  const dollars = Number.parseFloat(String(text).replace(/[^0-9.]/g, ''));
+  if (Number.isNaN(dollars) || dollars <= 0) {
+    await ctx.bot.sendMessage(chatId, 'Please send a valid dollar amount (e.g. 40).');
+    return;
+  }
+  const cents = Math.round(dollars * 100);
+  const updated = await setUserRate(telegramId, cents);
+  const fee = config.pricing.platformFeePct;
+  const net = Math.round((cents * (100 - fee)) / 100);
+  await ctx.bot.sendMessage(
+    chatId,
+    updated
+      ? `✅ Rate set to ${usd(cents)} — you’ll earn ${usd(net)} after our ${fee}% fee.`
+      : 'Could not save your rate.'
+  );
+}
+
 // The builder portal (/builder): shows their appointments + entry points.
 export async function builderPortal(ctx, chatId, telegramId) {
   const user = await getUserByTelegramId(telegramId);
@@ -90,11 +126,12 @@ export async function builderPortal(ctx, chatId, telegramId) {
 
   const appts = await listBookingsForExpert(user.id);
   const rating = await expertRatingSummary(user.id);
+  const rateStr = user.rate_cents != null ? usd(user.rate_cents) : `${usd(config.pricing.serviceFeeCents)} (default)`;
   let body =
     `👷 *Administrator portal*\n📍 Base address: ${user.address || '— not set —'}\n` +
-    `${ratingLine(rating)}\n\n`;
+    `💲 Your rate: ${rateStr}\n${ratingLine(rating)}\n\n`;
   if (!appts.length) {
-    body += 'You have no upcoming appointments. Tap *Open jobs* to accept one.';
+    body += 'You have no upcoming appointments yet. Set your availability so customers can book you.';
   } else {
     body += '*Your appointments:*';
     for (const b of appts) {
@@ -111,9 +148,11 @@ export async function builderPortal(ctx, chatId, telegramId) {
     parse_mode: 'Markdown',
     reply_markup: {
       inline_keyboard: [
-        [{ text: '📋 Open jobs', callback_data: 'exp:list' }],
-        [{ text: '📍 Update my address', callback_data: 'exp:addr' }],
         [{ text: '🗓️ My availability', callback_data: 'exp:avail' }],
+        [
+          { text: '💲 Set my rate', callback_data: 'exp:rate' },
+          { text: '📍 Address', callback_data: 'exp:addr' },
+        ],
       ],
     },
   });

@@ -29,10 +29,13 @@ export async function receiveHours(ctx, chatId, hours) {
   const s = ctx.sessions.get(chatId);
   if (s?.flow !== 'apply' || s.step !== 'hours') return;
   ctx.sessions.set(chatId, { ...s, step: 'rate', data: { ...s.data, hours } });
-  await ctx.bot.sendMessage(chatId, 'How much do you *charge* per session? (e.g. “$40 flat”)', {
-    parse_mode: 'Markdown',
-    reply_markup: { force_reply: true, input_field_placeholder: '$40' },
-  });
+  const fee = config.pricing.platformFeePct;
+  await ctx.bot.sendMessage(
+    chatId,
+    `How much do you *charge* per 1-hour session? (e.g. “$40”)\n\n` +
+      `Heads up: we take a *${fee}% platform fee*, so you’d keep *${100 - fee}%* of that.`,
+    { parse_mode: 'Markdown', reply_markup: { force_reply: true, input_field_placeholder: '$40' } }
+  );
 }
 
 export async function receiveRate(ctx, chatId, rate) {

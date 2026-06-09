@@ -12,7 +12,8 @@ create table if not exists users (
   role          text not null default 'customer'
                   check (role in ('customer', 'expert', 'admin')),
   active        boolean not null default true,
-  address       text,                          -- builder base address (surcharge origin)
+  address       text,                          -- Administrator base/pickup address
+  rate_cents    integer,                        -- Administrator's per-session rate (null = global default)
   balance_cents integer not null default 0,     -- prepaid wallet balance (USD cents)
   created_at    timestamptz not null default now()
 );

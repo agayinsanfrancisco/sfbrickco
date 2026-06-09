@@ -1,15 +1,28 @@
 import { config } from '../config.js';
-import { createBooking, slotTaken, listActiveAvailability } from '../supabase.js';
+import {
+  createBooking,
+  listActiveAvailability,
+  listExperts,
+  getExpertAvailability,
+  expertRatingSummary,
+  listBookedExpertIdsAt,
+  isExpertBookedAt,
+  getUserById,
+} from '../supabase.js';
 import { upcomingDays, hourlySlots, isCovered } from '../lib/slots.js';
 import { daysKeyboard, hoursKeyboard } from '../lib/keyboards.js';
 import { usd, fmtHourRange } from '../lib/format.js';
 import { getIntSetting, getBoolSetting } from '../lib/settings.js';
 import { presentWaiver } from './payments.js';
-import { notifyExpertsOfOpenBooking } from './expert.js';
 
 // Service fee: admin-editable setting, falling back to the env-derived default.
+// Used as the price floor when an Administrator hasn't set their own rate.
 export function serviceFeeCents() {
   return getIntSetting('service_fee_cents', config.pricing.serviceFeeCents);
+}
+
+function adminName(u) {
+  return u.full_name || u.username || 'Administrator';
 }
 
 export async function startBooking(ctx, chatId) {
@@ -17,20 +30,18 @@ export async function startBooking(ctx, chatId) {
     await ctx.bot.sendMessage(chatId, '🛠️ Bookings are paused right now — check back soon!');
     return;
   }
-  const fee = await serviceFeeCents();
   const flat = config.uber.flatFallbackCents;
   ctx.sessions.set(chatId, { flow: 'book', step: 'choosing_travel' });
   await ctx.bot.sendMessage(
     chatId,
     `🛠️ *Book an Administrator*\n\n` +
-      `One-time *${usd(fee)}* fee for a 1-hour on-site session. The Administrator needs a ride ` +
-      `to you — how do you want to handle it?`,
+      `On-site 1-hour session. The Administrator needs a ride to you — how do you want to handle it?`,
     {
       parse_mode: 'Markdown',
       reply_markup: {
         inline_keyboard: [
-          [{ text: `🚗 I’ll book their ride — ${usd(fee)} total`, callback_data: 'book:travel:ride' }],
-          [{ text: `➕ Flat ${usd(flat)} travel fee — ${usd(fee + flat)} total`, callback_data: 'book:travel:flat' }],
+          [{ text: `🚗 I’ll book their ride (no travel fee)`, callback_data: 'book:travel:ride' }],
+          [{ text: `➕ Add a flat ${usd(flat)} travel fee`, callback_data: 'book:travel:flat' }],
         ],
       },
     }
@@ -49,8 +60,8 @@ export async function chooseTravel(ctx, chatId, ownRide) {
 
 export async function pickDay(ctx, chatId, dateKey) {
   const slots = hourlySlots(dateKey);
-  // Only offer hours a builder is available for (#22). With no schedules set
-  // anywhere, isCovered returns true so all slots show.
+  // Only offer hours some active Administrator is available for. With no
+  // schedules set anywhere, isCovered returns true so all slots show.
   const avail = await listActiveAvailability();
   const open = slots.filter((s) => isCovered(avail, s.startIso));
   await ctx.bot.sendMessage(
@@ -62,25 +73,59 @@ export async function pickDay(ctx, chatId, dateKey) {
   );
 }
 
+// After picking the hour, show the Administrators available for it so the
+// customer can choose one (book directly).
 export async function pickHour(ctx, chatId, startIso) {
-  // Recompute end from start (+1h) rather than trusting client data.
   const endIso = new Date(new Date(startIso).getTime() + 60 * 60 * 1000).toISOString();
-  if (await slotTaken(startIso)) {
-    await ctx.bot.sendMessage(
-      chatId,
-      'Sorry, that hour was just taken. Please pick another time.'
-    );
+  const s = ctx.sessions.get(chatId) || {};
+  const experts = await listExperts({ activeOnly: true });
+  const bookedIds = await listBookedExpertIdsAt(startIso);
+  const floor = await serviceFeeCents();
+  const available = [];
+  for (const e of experts) {
+    if (bookedIds.includes(e.id)) continue;
+    const windows = await getExpertAvailability(e.id);
+    if (windows.length && !isCovered(windows, startIso)) continue;
+    const rating = await expertRatingSummary(e.id);
+    available.push({ id: e.id, name: adminName(e), rate: e.rate_cents ?? floor, rating });
+  }
+  if (!available.length) {
+    await ctx.bot.sendMessage(chatId, 'No Administrators are free at that hour — tap /book to pick another time.');
     return;
   }
-  const s = ctx.sessions.get(chatId) || {};
-  ctx.sessions.set(chatId, { ...s, flow: 'book', step: 'awaiting_street', data: { startIso, endIso } });
-  await ctx.bot.sendMessage(chatId, 'Great. What’s your *street address*?', {
+  ctx.sessions.set(chatId, { ...s, flow: 'book', step: 'choosing_admin', data: { startIso, endIso } });
+  const rows = available.map((a) => [
+    {
+      text: `${a.name} · ${a.rating.count ? `⭐${a.rating.avg}` : '⭐ new'} · ${usd(a.rate)}`,
+      callback_data: `book:admin:${a.id}`,
+    },
+  ]);
+  await ctx.bot.sendMessage(chatId, `Available for ${fmtHourRange(startIso, endIso)} — pick your Administrator:`, {
+    reply_markup: { inline_keyboard: rows },
+  });
+}
+
+export async function chooseAdmin(ctx, chatId, expertId) {
+  const s = ctx.sessions.get(chatId);
+  if (s?.flow !== 'book' || s.step !== 'choosing_admin' || !s.data?.startIso) return;
+  const admin = await getUserById(expertId);
+  if (!admin || admin.role !== 'expert' || !admin.active) {
+    await ctx.bot.sendMessage(chatId, 'That Administrator is no longer available — tap /book to try again.');
+    return;
+  }
+  if (await isExpertBookedAt(expertId, s.data.startIso)) {
+    await ctx.bot.sendMessage(chatId, 'That Administrator was just booked for that hour — tap /book to pick another time.');
+    return;
+  }
+  const rate = admin.rate_cents ?? (await serviceFeeCents());
+  ctx.sessions.set(chatId, { ...s, step: 'awaiting_street', expertId, adminName: adminName(admin), adminRate: rate });
+  await ctx.bot.sendMessage(chatId, `Booking *${adminName(admin)}*. What’s your *street address*?`, {
     parse_mode: 'Markdown',
     reply_markup: { force_reply: true, input_field_placeholder: '123 Main St' },
   });
 }
 
-// Address is collected in pieces (street → city → ZIP) and combined.
+// Address collected in pieces (street → city → ZIP) and combined.
 export async function receiveStreet(ctx, chatId, street) {
   const s = ctx.sessions.get(chatId);
   if (s?.flow !== 'book' || s.step !== 'awaiting_street') return;
@@ -101,27 +146,26 @@ export async function receiveCity(ctx, chatId, city) {
   });
 }
 
-// Final address piece → combine + show the confirm summary.
 export async function receiveZip(ctx, chatId, telegramId, zip) {
   const s = ctx.sessions.get(chatId);
   if (s?.flow !== 'book' || s.step !== 'awaiting_zip' || !s.data?.startIso) return;
   const { startIso, endIso, street, city } = s.data;
   const address = `${street}, ${city}, CA ${zip}`.replace(/\s+/g, ' ').trim();
   ctx.sessions.set(chatId, { ...s, step: 'awaiting_confirm', data: { startIso, endIso, address } });
-  const fee = await serviceFeeCents();
+  const fee = s.adminRate ?? (await serviceFeeCents());
   const surcharge = s.ownRide ? 0 : config.uber.flatFallbackCents;
   const total = fee + surcharge;
   const costLine = s.ownRide
     ? `💵 *${usd(total)}* (you book the ride)`
-    : `💵 *${usd(total)}* (service ${usd(fee)} + ${usd(surcharge)} travel)`;
+    : `💵 *${usd(total)}* (${usd(fee)} session + ${usd(surcharge)} travel)`;
   await ctx.bot.sendMessage(
     chatId,
-    `Please confirm your request:\n\n🕒 ${fmtHourRange(startIso, endIso)}\n📍 ${address}\n${costLine}`,
+    `Please confirm:\n\n👤 ${s.adminName}\n🕒 ${fmtHourRange(startIso, endIso)}\n📍 ${address}\n${costLine}`,
     {
       parse_mode: 'Markdown',
       reply_markup: {
         inline_keyboard: [
-          [{ text: '✅ Confirm request', callback_data: 'book:reqok' }],
+          [{ text: '✅ Confirm & continue to payment', callback_data: 'book:reqok' }],
           [{ text: '✖ Cancel', callback_data: 'book:cancel' }],
         ],
       },
@@ -131,21 +175,20 @@ export async function receiveZip(ctx, chatId, telegramId, zip) {
 
 export async function confirmRequest(ctx, chatId, telegramId) {
   const session = ctx.sessions.get(chatId);
-  if (session?.step !== 'awaiting_confirm' || !session?.data?.startIso) {
+  if (session?.step !== 'awaiting_confirm' || !session?.data?.startIso || !session.expertId) {
     await ctx.bot.sendMessage(chatId, 'That request expired — tap /book to start again.');
     return;
   }
   const { startIso, endIso, address } = session.data;
-  const ownRide = !!session.ownRide;
+  const { ownRide = false, expertId, adminName: chosenName } = session;
+  const serviceFee = session.adminRate ?? (await serviceFeeCents());
   ctx.sessions.delete(chatId);
 
-  // Re-check the slot at confirm time (it may have been taken meanwhile).
-  if (await slotTaken(startIso)) {
-    await ctx.bot.sendMessage(chatId, 'Sorry, that hour was just taken. Tap /book to pick another.');
+  if (await isExpertBookedAt(expertId, startIso)) {
+    await ctx.bot.sendMessage(chatId, 'That Administrator was just booked for that hour — tap /book to pick another.');
     return;
   }
 
-  const serviceFee = await serviceFeeCents();
   const surcharge = ownRide ? 0 : config.uber.flatFallbackCents;
   const total = serviceFee + surcharge;
   const booking = await createBooking({
@@ -154,22 +197,35 @@ export async function confirmRequest(ctx, chatId, telegramId) {
     slot_start: startIso,
     slot_end: endIso,
     service_fee_cents: serviceFee,
-    surcharge_cents: surcharge, // flat travel fee, or 0 if customer books the ride
+    surcharge_cents: surcharge,
     surcharge_source: ownRide ? 'customer_ride' : 'manual',
-    total_cents: total, // final at request time (no per-distance pricing on accept)
-    status: 'awaiting_acceptance',
+    total_cents: total,
+    status: 'awaiting_payment', // Administrator chosen directly — no open-job step
+    expert_id: expertId,
     customer_books_ride: ownRide,
   });
 
-  const tail = ownRide
-    ? `You’re booking the Administrator’s ride, so your total is *${usd(total)}*. An Administrator will accept, then we’ll send your payment link.`
-    : `Total *${usd(total)}* (service ${usd(serviceFee)} + ${usd(surcharge)} travel). An Administrator will accept, then we’ll send your payment link.`;
+  // Notify the chosen Administrator they've been booked (pending payment).
+  const admin = await getUserById(expertId);
+  if (admin) {
+    const travel = ownRide ? 'Customer books your ride.' : `${usd(surcharge)} travel included.`;
+    try {
+      await ctx.bot.sendMessage(
+        admin.telegram_id,
+        `📋 You’ve been booked for ${fmtHourRange(startIso, endIso)}.\n📍 ${address}\n${travel} ` +
+          `Total ${usd(total)} — pending the customer’s payment.`
+      );
+    } catch {
+      /* Administrator hasn't opened the bot */
+    }
+  }
+
   await ctx.bot.sendMessage(
     chatId,
-    `📝 *Request submitted* for ${fmtHourRange(startIso, endIso)}\n📍 ${address}\n\n${tail}`,
+    `📝 *Booked ${chosenName}* for ${fmtHourRange(startIso, endIso)}\n📍 ${address}\nTotal *${usd(total)}*.`,
     { parse_mode: 'Markdown' }
   );
-  await notifyExpertsOfOpenBooking(ctx, booking);
+  await presentWaiver(ctx, chatId, 'b', booking.id);
 
   // Upsell bricks at 20% off, before they pay (#11).
   await ctx.bot.sendMessage(
@@ -182,7 +238,7 @@ export async function confirmRequest(ctx, chatId, telegramId) {
   );
 }
 
-// Customer chose to pay → show the waiver gate first, then payment methods.
+// A "Pay" button (e.g. a re-show) → waiver gate, then payment methods.
 export async function payBooking(ctx, chatId, _telegramId, bookingId) {
   await presentWaiver(ctx, chatId, 'b', bookingId);
 }

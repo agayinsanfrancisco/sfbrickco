@@ -185,6 +185,8 @@ export function createBot() {
         await admin.doAddSku(ctx, chatId, msg.text);
       } else if (s.flow === 'expert' && s.step === 'awaiting_builder_address') {
         await expert.doSetAddress(ctx, chatId, telegramId, msg.text.trim());
+      } else if (s.flow === 'expert' && s.step === 'awaiting_rate') {
+        await expert.doSetRate(ctx, chatId, telegramId, msg.text.trim());
       } else if (s.flow === 'expert' && s.step === 'awaiting_availability') {
         await expert.doSetAvailability(ctx, chatId, telegramId, msg.text);
       } else if (s.flow === 'review' && s.step === 'awaiting_comment') {
@@ -244,6 +246,8 @@ export function createBot() {
         await booking.pickDay(ctx, chatId, sliceAfter(data, 'book:day:'));
       else if (data.startsWith('book:hour:'))
         await booking.pickHour(ctx, chatId, sliceAfter(data, 'book:hour:'));
+      else if (data.startsWith('book:admin:'))
+        await booking.chooseAdmin(ctx, chatId, sliceAfter(data, 'book:admin:'));
       else if (data.startsWith('book:pay:'))
         await booking.payBooking(ctx, chatId, telegramId, sliceAfter(data, 'book:pay:'));
       else if (data === 'book:travel:ride') await booking.chooseTravel(ctx, chatId, true);
@@ -304,6 +308,7 @@ export function createBot() {
       // Expert
       else if (data === 'exp:list') await expert.listJobs(ctx, chatId, telegramId);
       else if (data === 'exp:addr') await expert.promptSetAddress(ctx, chatId, telegramId);
+      else if (data === 'exp:rate') await expert.promptSetRate(ctx, chatId, telegramId);
       else if (data === 'exp:avail') await expert.showAvailability(ctx, chatId, telegramId);
       else if (data.startsWith('exp:acc:'))
         await expert.accept(ctx, chatId, telegramId, sliceAfter(data, 'exp:acc:'));

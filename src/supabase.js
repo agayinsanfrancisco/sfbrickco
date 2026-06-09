@@ -156,6 +156,16 @@ export async function setRole(telegramId, role) {
   return data;
 }
 
+export async function setUserRate(telegramId, rateCents) {
+  const { data } = await supabase
+    .from('users')
+    .update({ rate_cents: rateCents })
+    .eq('telegram_id', telegramId)
+    .select('*')
+    .maybeSingle();
+  return data;
+}
+
 export async function setUserAddress(telegramId, address) {
   const { data } = await supabase
     .from('users')
@@ -606,6 +616,29 @@ export async function markReviewPrompted(bookingId) {
     .from('bookings')
     .update({ review_prompted: true, status: 'completed' })
     .eq('id', bookingId);
+}
+
+// Expert ids already booked at a given hour (so we don't offer them again).
+export async function listBookedExpertIdsAt(slotStartIso) {
+  const { data } = await supabase
+    .from('bookings')
+    .select('expert_id')
+    .eq('slot_start', slotStartIso)
+    .not('expert_id', 'is', null)
+    .in('status', ['awaiting_payment', 'accepted', 'pending']);
+  return (data || []).map((r) => r.expert_id);
+}
+
+// Is this specific Administrator already booked at this hour?
+export async function isExpertBookedAt(expertId, slotStartIso) {
+  const { data } = await supabase
+    .from('bookings')
+    .select('id')
+    .eq('expert_id', expertId)
+    .eq('slot_start', slotStartIso)
+    .in('status', ['awaiting_payment', 'accepted', 'pending'])
+    .limit(1);
+  return (data || []).length > 0;
 }
 
 // Does this hour already have an active (pending/accepted) booking?

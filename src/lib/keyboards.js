@@ -100,21 +100,34 @@ export function ratingKeyboard(bookingId) {
 }
 
 export function adminMenu() {
+  const hdr = (text) => [{ text, callback_data: 'noop' }];
   return {
     reply_markup: {
       inline_keyboard: [
-        [{ text: '👥 List users', callback_data: 'adm:users' }],
-        [{ text: '🧰 Applications', callback_data: 'adm:apps' }],
-        [{ text: '➕ Add Administrator', callback_data: 'adm:addexpert' }],
+        hdr('— 👥 People —'),
+        [
+          { text: '👥 Users', callback_data: 'adm:users' },
+          { text: '🧰 Apps', callback_data: 'adm:apps' },
+          { text: '➕ Add', callback_data: 'adm:addexpert' },
+        ],
         [{ text: '➖ Remove user', callback_data: 'adm:remove' }],
-        [{ text: '📋 Pending bookings', callback_data: 'adm:bookings' }],
-        [{ text: '📦 Open orders', callback_data: 'adm:orders' }],
-        [{ text: '🔎 Find order', callback_data: 'adm:find' }],
-        [{ text: '📣 Broadcast', callback_data: 'adm:broadcast' }],
-        [{ text: '📦 Inventory', callback_data: 'adm:inv' }],
-        [{ text: '💲 Fees', callback_data: 'adm:fees' }],
-        [{ text: '🎚️ Features', callback_data: 'adm:features' }],
-        [{ text: '🏷️ Add promo', callback_data: 'adm:addpromo' }],
+        hdr('— 📦 Orders & Bookings —'),
+        [
+          { text: '📦 Open orders', callback_data: 'adm:orders' },
+          { text: '📋 Bookings', callback_data: 'adm:bookings' },
+          { text: '🔎 Find', callback_data: 'adm:find' },
+        ],
+        hdr('— 🧱 Catalog & Promos —'),
+        [
+          { text: '📦 Inventory', callback_data: 'adm:inv' },
+          { text: '🏷️ Add promo', callback_data: 'adm:addpromo' },
+        ],
+        hdr('— ⚙️ Settings —'),
+        [
+          { text: '💲 Fees', callback_data: 'adm:fees' },
+          { text: '🎚️ Features', callback_data: 'adm:features' },
+          { text: '📣 Broadcast', callback_data: 'adm:broadcast' },
+        ],
       ],
     },
   };
