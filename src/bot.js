@@ -365,7 +365,7 @@ export function createBot() {
       else if (data === 'adm:addsku') await admin.promptAddSku(ctx, chatId, telegramId);
       else if (data === 'adm:features') await admin.showFeatures(ctx, chatId, telegramId);
       else if (data.startsWith('adm:flag:'))
-        await admin.toggleFlag(ctx, chatId, telegramId, sliceAfter(data, 'adm:flag:'));
+        await admin.toggleFlag(ctx, chatId, telegramId, sliceAfter(data, 'adm:flag:'), messageId);
       else if (data === 'adm:addpromo') await admin.promptAddPromo(ctx, chatId, telegramId);
       else if (data === 'adm:apps') await admin.showApplications(ctx, chatId, telegramId);
       else if (data.startsWith('adm:appok:'))

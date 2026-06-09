@@ -43,10 +43,11 @@ function ensureAdmin(ctx, chatId, telegramId) {
 
 export async function showMenu(ctx, chatId, telegramId) {
   if (!ensureAdmin(ctx, chatId, telegramId)) return;
-  await ctx.bot.sendMessage(chatId, '⚙️ *Owner panel*', {
-    parse_mode: 'Markdown',
-    ...adminMenu(),
-  });
+  await ctx.bot.sendMessage(
+    chatId,
+    '⚙️ *Owner panel*\nManage people, orders, catalog & settings. Tap any control below.',
+    { parse_mode: 'Markdown', ...adminMenu() }
+  );
 }
 
 export async function showUsers(ctx, chatId, telegramId) {
@@ -348,7 +349,10 @@ export async function showRepeatCustomers(ctx, chatId, telegramId) {
   await ctx.bot.sendMessage(
     chatId,
     `🔁 *Repeat customers* (2+ paid bookings)\n_Loyalty + off-platform watch list._\n\n${lines.join('\n')}`,
-    { parse_mode: 'Markdown' }
+    {
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: [[{ text: '⬅️ Back to panel', callback_data: 'adm:menu' }]] },
+    }
   );
 }
 
@@ -381,6 +385,7 @@ export async function showFees(ctx, chatId, telegramId) {
           [{ text: '🎁 Edit bonus %', callback_data: 'adm:fee:bonuspct' }],
           [{ text: '🎁 Edit bonus cap', callback_data: 'adm:fee:bonuscap' }],
           [{ text: '🎁 Edit unlock pack size', callback_data: 'adm:fee:bonusqty' }],
+          [{ text: '⬅️ Back to panel', callback_data: 'adm:menu' }],
         ],
       },
     }
@@ -583,22 +588,36 @@ const FLAGS = [
   { key: 'flag_wallet', label: 'Wallet' },
 ];
 
-export async function showFeatures(ctx, chatId, telegramId) {
-  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+async function featuresKeyboard() {
   const states = await Promise.all(FLAGS.map((f) => getBoolSetting(f.key, true)));
   const rows = FLAGS.map((f, i) => [
-    { text: `${f.label}: ${states[i] ? '🟢 on' : '🔴 off'} — tap to toggle`, callback_data: `adm:flag:${f.key}` },
+    { text: `${states[i] ? '🟢' : '🔴'} ${f.label} — ${states[i] ? 'on' : 'off'}`, callback_data: `adm:flag:${f.key}` },
   ]);
-  await ctx.bot.sendMessage(chatId, '🎚️ *Features*', { parse_mode: 'Markdown', reply_markup: { inline_keyboard: rows } });
+  rows.push([{ text: '⬅️ Back to panel', callback_data: 'adm:menu' }]);
+  return { inline_keyboard: rows };
 }
 
-export async function toggleFlag(ctx, chatId, telegramId, key) {
+export async function showFeatures(ctx, chatId, telegramId) {
+  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  await ctx.bot.sendMessage(
+    chatId,
+    '🎚️ *Features*\nTap to turn a section on or off for customers. Off = hidden + blocked.',
+    { parse_mode: 'Markdown', reply_markup: await featuresKeyboard() }
+  );
+}
+
+// Toggle a flag and update the same message in place (no message spam).
+export async function toggleFlag(ctx, chatId, telegramId, key, messageId) {
   if (!ensureAdmin(ctx, chatId, telegramId)) return;
   if (!FLAGS.some((f) => f.key === key)) return;
   const current = await getBoolSetting(key, true);
   await setSetting(key, current ? 'off' : 'on');
   invalidateSettings();
-  await showFeatures(ctx, chatId, telegramId);
+  try {
+    await ctx.bot.editMessageReplyMarkup(await featuresKeyboard(), { chat_id: chatId, message_id: messageId });
+  } catch {
+    await showFeatures(ctx, chatId, telegramId);
+  }
 }
 
 // ── Promo codes (#19) ────────────────────────────────────────────────
