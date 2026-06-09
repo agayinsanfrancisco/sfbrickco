@@ -135,14 +135,20 @@ export async function builderPortal(ctx, chatId, telegramId) {
   } else {
     body += '*Your appointments:*';
     for (const b of appts) {
-      const cust = await getUserByTelegramId(b.customer_telegram_id);
-      const who = cust?.username ? `@${cust.username}` : `id ${b.customer_telegram_id}`;
-      const pay = b.payment_status === 'paid' ? '✅ paid' : '⏳ awaiting payment';
+      const paid = b.payment_status === 'paid';
+      // Reveal the customer's name + handle only after payment.
+      let who = 'shown after payment';
+      if (paid) {
+        const cust = await getUserByTelegramId(b.customer_telegram_id);
+        who = cust
+          ? `${cust.full_name || 'Customer'}${cust.username ? ` (@${cust.username})` : ''}`
+          : `id ${b.customer_telegram_id}`;
+      }
       const net = Math.round((b.service_fee_cents * (100 - config.pricing.platformFeePct)) / 100);
       body +=
         `\n\n🕑 ${fmtHourRange(b.slot_start, b.slot_end)}\n` +
         `📍 ${b.customer_address}\n👤 ${who}\n` +
-        `💵 You earn *${usd(net)}* (customer pays ${usd(b.total_cents)}) — ${pay}`;
+        `💵 You earn *${usd(net)}* (customer pays ${usd(b.total_cents)}) — ${paid ? '✅ paid' : '⏳ awaiting payment'}`;
     }
   }
   await ctx.bot.sendMessage(chatId, body, {

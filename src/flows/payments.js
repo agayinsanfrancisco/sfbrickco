@@ -14,6 +14,7 @@ import {
   setBookingCrypto,
   nextDerivationIndex,
   getUserById,
+  getUserByTelegramId,
   getBalance,
   debitBalance,
   creditBalance,
@@ -550,14 +551,23 @@ export async function confirmBooking(ctx, booking, { auto = false } = {}) {
   } catch {
     /* ignore */
   }
-  // Notify the assigned builder that their job is paid/confirmed.
+  // Notify the assigned builder that their job is paid/confirmed. Customer
+  // contact (name + handle) is revealed only now, post-payment, so they can
+  // coordinate the visit — not before payment.
   if (paid.expert_id) {
     const builder = await getUserById(paid.expert_id);
     if (builder) {
+      const cust = await getUserByTelegramId(paid.customer_telegram_id);
+      const contact = cust
+        ? `\n👤 ${cust.full_name || 'Customer'}${cust.username ? ` (@${cust.username})` : ''}${
+            paid.contact_phone ? ` · 📞 ${paid.contact_phone}` : ''
+          }`
+        : '';
       try {
         await ctx.bot.sendMessage(
           builder.telegram_id,
-          `💰 Payment received — your job for ${when} at ${paid.customer_address} is confirmed.`
+          `💰 Payment received — your job for ${when} at ${paid.customer_address} is confirmed.${contact}` +
+            `\n\nPlease coordinate through SF Brick Company; per your agreement, off-platform bookings aren’t allowed.`
         );
       } catch {
         /* ignore */
