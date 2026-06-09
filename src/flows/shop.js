@@ -258,10 +258,14 @@ async function addressComplete(ctx, chatId, address) {
   ctx.sessions.set(chatId, { ...s, step: 'awaiting_phone', address, deliveryFee });
   await ctx.bot.sendMessage(
     chatId,
-    '📱 Share your phone number so the courier can reach you (or just type it):',
+    '📱 *Optional:* add a phone for the courier — or skip and we’ll reach you right here on Telegram.',
     {
+      parse_mode: 'Markdown',
       reply_markup: {
-        keyboard: [[{ text: '📱 Share my number', request_contact: true }]],
+        keyboard: [
+          [{ text: '📱 Share my number', request_contact: true }],
+          [{ text: '⏭️ Skip — message me on Telegram' }],
+        ],
         resize_keyboard: true,
         one_time_keyboard: true,
       },
@@ -272,10 +276,11 @@ async function addressComplete(ctx, chatId, address) {
 export async function receivePhone(ctx, chatId, telegramId, phone, handle) {
   const s = ctx.sessions.get(chatId);
   if (!s?.cart?.length || s.step !== 'awaiting_phone') return;
-  ctx.sessions.set(chatId, { ...s, step: 'awaiting_note', phone: phone || null, handle: handle || null });
+  const skipped = !phone || phone.startsWith('⏭️ Skip');
+  ctx.sessions.set(chatId, { ...s, step: 'awaiting_note', phone: skipped ? null : phone, handle: handle || null });
   await ctx.bot.sendMessage(
     chatId,
-    '📝 Any delivery notes (gate code, unit #, drop-off spot)? Type a message, or tap Skip.',
+    `${skipped ? '👍 No problem — we’ll reach you on Telegram.\n\n' : ''}📝 Any delivery notes (gate code, unit #, drop-off spot)? Type a message, or tap Skip.`,
     { reply_markup: { inline_keyboard: [[{ text: 'Skip', callback_data: 'shop:noteskip' }]] } }
   );
 }

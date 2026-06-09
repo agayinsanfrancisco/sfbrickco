@@ -562,23 +562,20 @@ export async function confirmBooking(ctx, booking, { auto = false } = {}) {
   } catch {
     /* ignore */
   }
-  // Notify the assigned builder that their job is paid/confirmed. Customer
-  // contact (name + handle) is revealed only now, post-payment, so they can
-  // coordinate the visit — not before payment.
+  // Notify the assigned builder that their job is paid/confirmed. We DON'T share
+  // the customer's phone or @handle — coordination happens through the in-bot
+  // relay (privacy + keeps the booking on-platform). Just a first name so the
+  // builder knows who they're meeting at the door.
   if (paid.expert_id) {
     const builder = await getUserById(paid.expert_id);
     if (builder) {
       const cust = await getUserByTelegramId(paid.customer_telegram_id);
-      const contact = cust
-        ? `\n👤 ${cust.full_name || 'Customer'}${cust.username ? ` (@${cust.username})` : ''}${
-            paid.contact_phone ? ` · 📞 ${paid.contact_phone}` : ''
-          }`
-        : '';
+      const firstName = cust?.full_name ? cust.full_name.split(' ')[0] : 'your customer';
       try {
         await ctx.bot.sendMessage(
           builder.telegram_id,
-          `💰 Payment received — your job for ${when} at ${paid.customer_address} is confirmed.${contact}` +
-            `\n\nPlease coordinate through SF Brick Company; per your agreement, off-platform bookings aren’t allowed.`,
+          `💰 Payment received — your job for ${when} at ${paid.customer_address} is confirmed.\n👤 ${firstName}` +
+            `\n\nMessage ${firstName} right here to coordinate — their contact stays private, and off-platform bookings aren’t allowed per your agreement.`,
           { reply_markup: { inline_keyboard: [[{ text: '💬 Message your customer', callback_data: `relay:admin:${paid.id}` }]] } }
         );
       } catch {
