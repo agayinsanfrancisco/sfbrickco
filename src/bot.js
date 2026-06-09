@@ -14,6 +14,7 @@ import * as payments from './flows/payments.js';
 import * as account from './flows/account.js';
 import * as wallet from './flows/wallet.js';
 import * as apply from './flows/apply.js';
+import * as relay from './flows/relay.js';
 
 // Simple per-user rate limiter (#23): max N actions per sliding window.
 function makeRateLimiter({ max, windowMs }) {
@@ -203,6 +204,8 @@ export function createBot() {
         await apply.receiveRate(ctx, chatId, msg.text.trim());
       } else if (s.flow === 'apply' && s.step === 'address') {
         await apply.receiveAddress(ctx, chatId, telegramId, msg.from.username, msg.text.trim());
+      } else if (s.flow === 'relay' && s.step === 'messaging') {
+        await relay.relayMessage(ctx, chatId, telegramId, msg.text.trim());
       } else if (s.flow === 'admin' && s.step === 'awaiting_add_promo') {
         await admin.doAddPromo(ctx, chatId, msg.text);
       }
@@ -285,6 +288,11 @@ export function createBot() {
       else if (data.startsWith('wal:coin:')) {
         const [coin, cents] = sliceAfter(data, 'wal:coin:').split(':');
         await wallet.payDeposit(ctx, chatId, telegramId, coin, Number.parseInt(cents, 10));
+      }
+      // In-bot relay messaging
+      else if (data.startsWith('relay:')) {
+        const [role, bid] = sliceAfter(data, 'relay:').split(':');
+        await relay.startRelay(ctx, chatId, telegramId, bid, role);
       }
       // Apply to be an Administrator
       else if (data === 'apply:start') await apply.startApply(ctx, chatId);
