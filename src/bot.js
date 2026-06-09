@@ -346,6 +346,8 @@ export function createBot() {
       // Admin
       else if (data === 'adm:menu') await admin.showMenu(ctx, chatId, telegramId);
       else if (data === 'adm:users') await admin.showUsers(ctx, chatId, telegramId);
+      else if (data.startsWith('adm:cat:'))
+        await admin.showCategory(ctx, chatId, telegramId, sliceAfter(data, 'adm:cat:'));
       else if (data === 'adm:repeat') await admin.showRepeatCustomers(ctx, chatId, telegramId);
       else if (data === 'adm:test') await testmode.showTestMode(ctx, chatId, telegramId);
       else if (data === 'adm:test:cust') await testmode.setMode(ctx, chatId, telegramId, 'customer');

@@ -29,7 +29,7 @@ import {
   promoteToExpert,
 } from '../supabase.js';
 import { manualSurchargeCents, estimateBetween } from '../uber.js';
-import { adminMenu } from '../lib/keyboards.js';
+import { adminMenu, adminCategory } from '../lib/keyboards.js';
 import { usd, fmtHourRange, shortRef, orderItemsSummary } from '../lib/format.js';
 import { getIntSetting, getBoolSetting, invalidateSettings } from '../lib/settings.js';
 
@@ -45,9 +45,17 @@ export async function showMenu(ctx, chatId, telegramId) {
   if (!ensureAdmin(ctx, chatId, telegramId)) return;
   await ctx.bot.sendMessage(
     chatId,
-    '⚙️ *Owner panel*\nManage people, orders, catalog & settings. Tap any control below.',
+    '⚙️ *Owner panel*\nPick a category to manage people, orders, catalog or settings.',
     { parse_mode: 'Markdown', ...adminMenu() }
   );
+}
+
+// Open one owner-panel category (drill-down from showMenu).
+export async function showCategory(ctx, chatId, telegramId, cat) {
+  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const kb = adminCategory(cat);
+  if (!kb) return;
+  await ctx.bot.sendMessage(chatId, `*${kb.title}*`, { parse_mode: 'Markdown', reply_markup: kb.reply_markup });
 }
 
 export async function showUsers(ctx, chatId, telegramId) {

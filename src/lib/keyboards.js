@@ -99,40 +99,74 @@ export function ratingKeyboard(bookingId) {
   };
 }
 
+// Owner panel is a drill-down: top level = category buttons, each opens its
+// own section (see adminCategory). Keeps the panel short and tidy.
 export function adminMenu() {
-  const hdr = (text) => [{ text, callback_data: 'noop' }];
   return {
     reply_markup: {
       inline_keyboard: [
-        hdr('— 👥 People —'),
-        [
-          { text: '👥 Users', callback_data: 'adm:users' },
-          { text: '🧰 Apps', callback_data: 'adm:apps' },
-          { text: '➕ Add', callback_data: 'adm:addexpert' },
-        ],
-        [
-          { text: '➖ Remove user', callback_data: 'adm:remove' },
-          { text: '🔁 Repeat customers', callback_data: 'adm:repeat' },
-        ],
-        hdr('— 📦 Orders & Bookings —'),
-        [
-          { text: '📦 Open orders', callback_data: 'adm:orders' },
-          { text: '📋 Bookings', callback_data: 'adm:bookings' },
-          { text: '🔎 Find', callback_data: 'adm:find' },
-        ],
-        hdr('— 🧱 Catalog & Promos —'),
-        [
-          { text: '📦 Inventory', callback_data: 'adm:inv' },
-          { text: '🏷️ Add promo', callback_data: 'adm:addpromo' },
-        ],
-        hdr('— ⚙️ Settings —'),
-        [
-          { text: '💲 Fees', callback_data: 'adm:fees' },
-          { text: '🎚️ Features', callback_data: 'adm:features' },
-          { text: '📣 Broadcast', callback_data: 'adm:broadcast' },
-        ],
+        [{ text: '👥 People', callback_data: 'adm:cat:people' }],
+        [{ text: '📦 Orders & Bookings', callback_data: 'adm:cat:orders' }],
+        [{ text: '🧱 Catalog & Promos', callback_data: 'adm:cat:catalog' }],
+        [{ text: '⚙️ Settings', callback_data: 'adm:cat:settings' }],
         [{ text: '🧪 Test mode (view as / simulate pay)', callback_data: 'adm:test' }],
       ],
     },
+  };
+}
+
+const ADMIN_CATEGORIES = {
+  people: {
+    title: '👥 People',
+    rows: [
+      [
+        { text: '👥 Users', callback_data: 'adm:users' },
+        { text: '🧰 Apps', callback_data: 'adm:apps' },
+        { text: '➕ Add', callback_data: 'adm:addexpert' },
+      ],
+      [
+        { text: '➖ Remove user', callback_data: 'adm:remove' },
+        { text: '🔁 Repeat customers', callback_data: 'adm:repeat' },
+      ],
+    ],
+  },
+  orders: {
+    title: '📦 Orders & Bookings',
+    rows: [
+      [
+        { text: '📦 Open orders', callback_data: 'adm:orders' },
+        { text: '📋 Bookings', callback_data: 'adm:bookings' },
+        { text: '🔎 Find', callback_data: 'adm:find' },
+      ],
+    ],
+  },
+  catalog: {
+    title: '🧱 Catalog & Promos',
+    rows: [
+      [
+        { text: '📦 Inventory', callback_data: 'adm:inv' },
+        { text: '🏷️ Add promo', callback_data: 'adm:addpromo' },
+      ],
+    ],
+  },
+  settings: {
+    title: '⚙️ Settings',
+    rows: [
+      [
+        { text: '💲 Fees', callback_data: 'adm:fees' },
+        { text: '🎚️ Features', callback_data: 'adm:features' },
+        { text: '📣 Broadcast', callback_data: 'adm:broadcast' },
+      ],
+    ],
+  },
+};
+
+// Keyboard for one owner-panel category (its actions + a back button).
+export function adminCategory(cat) {
+  const c = ADMIN_CATEGORIES[cat];
+  if (!c) return null;
+  return {
+    title: c.title,
+    reply_markup: { inline_keyboard: [...c.rows, [{ text: '⬅️ Back to panel', callback_data: 'adm:menu' }]] },
   };
 }
