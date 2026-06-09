@@ -2,6 +2,7 @@ import { config, isAdminId } from '../config.js';
 import * as crypto from '../crypto.js';
 import { usd, fmtHourRange, shortRef, orderItemsSummary } from '../lib/format.js';
 import { orderTotalCents, discountFor } from '../lib/money.js';
+import { getIntSetting } from '../lib/settings.js';
 import {
   getOrder,
   markOrderPaid,
@@ -493,6 +494,27 @@ export async function confirmOrder(ctx, order, { auto = false } = {}) {
   const paid = await markOrderPaid(order.id);
   if (!paid) return false; // already confirmed
   logEvent(order.telegram_id, 'order_paid', { id: order.id, total: orderTotalCents(order) });
+
+  // Brick-buy wallet bonus (#incentive): contingent on a qualifying purchase —
+  // only ever paid to actual buyers. Flat credit on orders at/above a threshold.
+  const bonusCents = await getIntSetting('brick_bonus_cents', 0);
+  const bonusMin = await getIntSetting('brick_bonus_min_cents', 0);
+  if (bonusCents > 0 && (order.amount_cents || 0) >= bonusMin) {
+    try {
+      const bal = await creditBalance(order.telegram_id, bonusCents, {
+        kind: 'bonus',
+        refType: 'order',
+        refId: order.id,
+      });
+      await ctx.bot.sendMessage(
+        order.telegram_id,
+        `🎁 You earned a *${usd(bonusCents)}* wallet bonus on this order! Balance: *${usd(bal)}*.`,
+        { parse_mode: 'Markdown' }
+      );
+    } catch {
+      /* ignore */
+    }
+  }
   // Decrement stock per line item (cart) or the single SKU; deactivate + alert
   // admins on any item hitting zero (#14, #17).
   const lines = order.items?.length ? order.items : [{ sku: order.sku, qty: order.qty, name: order.sku }];

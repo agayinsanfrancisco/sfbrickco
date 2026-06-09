@@ -38,7 +38,10 @@ export async function startShop(ctx, chatId) {
   const cart = getCart(ctx, chatId);
   if (cart.length) rows.push([{ text: `🛒 View cart (${cart.length})`, callback_data: 'shop:cart' }]);
   rows.push([{ text: '🛠️ Hire an Admin', callback_data: 'shop:addadmin' }]);
-  await ctx.bot.sendMessage(chatId, '🧱 *Shop* — pick a product:', {
+  const bonus = await getIntSetting('brick_bonus_cents', 0);
+  const bonusMin = await getIntSetting('brick_bonus_min_cents', 0);
+  const offer = bonus > 0 ? `\n🎁 Spend ${usd(bonusMin)}+ and get a *${usd(bonus)}* wallet bonus!` : '';
+  await ctx.bot.sendMessage(chatId, `🧱 *Shop* — pick a product:${offer}`, {
     parse_mode: 'Markdown',
     reply_markup: { inline_keyboard: rows },
   });

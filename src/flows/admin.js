@@ -336,14 +336,18 @@ export async function doRefund(ctx, chatId, text) {
 // ── Editable fees (#44) ──────────────────────────────────────────────
 export async function showFees(ctx, chatId, telegramId) {
   if (!ensureAdmin(ctx, chatId, telegramId)) return;
-  const [service, base, perMile] = await Promise.all([
+  const [service, base, perMile, bonus, bonusMin] = await Promise.all([
     getIntSetting('service_fee_cents', config.pricing.serviceFeeCents),
     getIntSetting('uber_base_cents', config.uber.baseCents),
     getIntSetting('uber_per_mile_cents', config.uber.perMileCents),
+    getIntSetting('brick_bonus_cents', 0),
+    getIntSetting('brick_bonus_min_cents', 0),
   ]);
+  const bonusLine = bonus > 0 ? `${usd(bonus)} on orders ≥ ${usd(bonusMin)}` : 'off';
   await ctx.bot.sendMessage(
     chatId,
-    `💲 *Fees*\n• Service fee: ${usd(service)}\n• Travel base: ${usd(base)}\n• Per mile: ${usd(perMile)}`,
+    `💲 *Fees*\n• Service fee: ${usd(service)}\n• Travel base: ${usd(base)}\n• Per mile: ${usd(perMile)}\n` +
+      `• 🎁 Brick-buy bonus: ${bonusLine}`,
     {
       parse_mode: 'Markdown',
       reply_markup: {
@@ -351,13 +355,23 @@ export async function showFees(ctx, chatId, telegramId) {
           [{ text: 'Edit service fee', callback_data: 'adm:fee:service' }],
           [{ text: 'Edit travel base', callback_data: 'adm:fee:base' }],
           [{ text: 'Edit per-mile', callback_data: 'adm:fee:permile' }],
+          [
+            { text: '🎁 Bonus amount', callback_data: 'adm:fee:brickbonus' },
+            { text: '🎁 Bonus min order', callback_data: 'adm:fee:brickmin' },
+          ],
         ],
       },
     }
   );
 }
 
-const FEE_KEYS = { service: 'service_fee_cents', base: 'uber_base_cents', permile: 'uber_per_mile_cents' };
+const FEE_KEYS = {
+  service: 'service_fee_cents',
+  base: 'uber_base_cents',
+  permile: 'uber_per_mile_cents',
+  brickbonus: 'brick_bonus_cents',
+  brickmin: 'brick_bonus_min_cents',
+};
 
 export async function promptSetFee(ctx, chatId, telegramId, which) {
   if (!ensureAdmin(ctx, chatId, telegramId)) return;
