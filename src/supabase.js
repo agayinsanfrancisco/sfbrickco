@@ -585,6 +585,28 @@ export async function declineBooking(bookingId) {
   return data;
 }
 
+// Reassign a booking to a different Administrator (builder cancel → next free).
+export async function reassignBooking(bookingId, newExpertId) {
+  const { data } = await supabase
+    .from('bookings')
+    .update({ expert_id: newExpertId })
+    .eq('id', bookingId)
+    .select('*')
+    .maybeSingle();
+  return data;
+}
+
+// Force-cancel a booking regardless of payment state (support handles refunds).
+export async function markBookingCancelled(bookingId) {
+  const { data } = await supabase
+    .from('bookings')
+    .update({ status: 'cancelled' })
+    .eq('id', bookingId)
+    .select('*')
+    .maybeSingle();
+  return data;
+}
+
 export async function setBookingSurcharge(bookingId, { surchargeCents, source, totalCents }) {
   const { data } = await supabase
     .from('bookings')

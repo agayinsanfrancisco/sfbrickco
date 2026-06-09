@@ -12,9 +12,12 @@ import {
   expertRatingSummary,
   getExpertAvailability,
   setExpertAvailability,
+  listBookedExpertIdsAt,
+  reassignBooking,
+  markBookingCancelled,
 } from '../supabase.js';
 import { expertJobKeyboard } from '../lib/keyboards.js';
-import { usd, fmtHourRange } from '../lib/format.js';
+import { usd, fmtHourRange, shortRef } from '../lib/format.js';
 import { isCovered } from '../lib/slots.js';
 
 const DOW_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -155,7 +158,10 @@ export async function builderPortal(ctx, chatId, telegramId) {
     parse_mode: 'Markdown',
     reply_markup: {
       inline_keyboard: [
-        [{ text: '🗓️ My availability', callback_data: 'exp:avail' }],
+        [
+          { text: '📋 My jobs', callback_data: 'exp:jobs' },
+          { text: '🗓️ Availability', callback_data: 'exp:avail' },
+        ],
         [
           { text: '💲 Set my rate', callback_data: 'exp:rate' },
           { text: '📍 Address', callback_data: 'exp:addr' },
@@ -214,6 +220,101 @@ export async function doSetAvailability(ctx, chatId, telegramId, text) {
   }
   await setExpertAvailability(user.id, windows);
   await ctx.bot.sendMessage(chatId, `✅ Availability saved:\n${fmtWindows(windows)}`, { parse_mode: 'Markdown' });
+}
+
+// ── Manage my jobs (cancel → reassign to next free, else support) ────
+async function findReplacementAdmin(slotIso, excludeId) {
+  const experts = await listExperts({ activeOnly: true });
+  const bookedIds = await listBookedExpertIdsAt(slotIso);
+  for (const e of experts) {
+    if (e.id === excludeId || bookedIds.includes(e.id)) continue;
+    const windows = await getExpertAvailability(e.id);
+    if (windows.length && !isCovered(windows, slotIso)) continue;
+    return e;
+  }
+  return null;
+}
+
+export async function showMyJobs(ctx, chatId, telegramId) {
+  const user = await ensureExpert(ctx, chatId, telegramId);
+  if (!user) return;
+  const jobs = await listBookingsForExpert(user.id);
+  if (!jobs.length) {
+    await ctx.bot.sendMessage(chatId, 'You have no upcoming jobs.');
+    return;
+  }
+  for (const b of jobs) {
+    const paid = b.payment_status === 'paid';
+    await ctx.bot.sendMessage(
+      chatId,
+      `🛠️ ${shortRef(b.id)} — ${fmtHourRange(b.slot_start, b.slot_end)}\n📍 ${b.customer_address}\n` +
+        `💵 ${usd(b.total_cents)} · ${paid ? '✅ paid' : '⏳ awaiting payment'}`,
+      { reply_markup: { inline_keyboard: [[{ text: '✖ Cancel this job', callback_data: `exp:cancel:${b.id}` }]] } }
+    );
+  }
+}
+
+export async function cancelJob(ctx, chatId, telegramId, bookingId) {
+  const user = await ensureExpert(ctx, chatId, telegramId);
+  if (!user) return;
+  const booking = await getBooking(bookingId);
+  if (!booking || booking.expert_id !== user.id || !['awaiting_payment', 'accepted'].includes(booking.status)) {
+    await ctx.bot.sendMessage(chatId, 'That job can’t be cancelled.');
+    return;
+  }
+  const when = fmtHourRange(booking.slot_start, booking.slot_end);
+  const replacement = await findReplacementAdmin(booking.slot_start, user.id);
+  if (replacement) {
+    await reassignBooking(bookingId, replacement.id);
+    const travel = booking.customer_books_ride
+      ? 'Customer books your ride.'
+      : `${usd(booking.surcharge_cents)} travel included.`;
+    const paidNote = booking.payment_status === 'paid' ? ' (already paid)' : ' — pending payment';
+    try {
+      await ctx.bot.sendMessage(
+        replacement.telegram_id,
+        `📋 You’ve been assigned a job for ${when}.\n📍 ${booking.customer_address}\n${travel} Total ${usd(booking.total_cents)}${paidNote}.`
+      );
+    } catch {
+      /* ignore */
+    }
+    const rating = await expertRatingSummary(replacement.id);
+    const rname = replacement.full_name || (replacement.username ? `@${replacement.username}` : 'another Administrator');
+    try {
+      await ctx.bot.sendMessage(
+        booking.customer_telegram_id,
+        `🔄 Your Administrator had to cancel — *${rname}* (${ratingLine(rating)}) has taken over your ${when} booking. No action needed.`,
+        { parse_mode: 'Markdown' }
+      );
+    } catch {
+      /* ignore */
+    }
+    await ctx.bot.sendMessage(chatId, '✅ Cancelled — reassigned to another available Administrator.');
+  } else {
+    await markBookingCancelled(bookingId);
+    const refundNote = booking.payment_status === 'paid' ? ' We’ll arrange a reschedule or refund.' : '';
+    try {
+      await ctx.bot.sendMessage(
+        booking.customer_telegram_id,
+        `⚠️ Your Administrator had to cancel your ${when} booking and no one else is available for that time.${refundNote}\nPlease chat with support:`,
+        { reply_markup: { inline_keyboard: [[{ text: '💬 Chat with support', url: 'https://t.me/redbluebrick' }]] } }
+      );
+    } catch {
+      /* ignore */
+    }
+    for (const adminId of config.adminIds) {
+      try {
+        await ctx.bot.sendMessage(
+          adminId,
+          `⚠️ Booking ${shortRef(bookingId)} (${when}) — Administrator cancelled, no replacement available. ` +
+            `${booking.payment_status === 'paid' ? 'PAID — needs refund/reschedule.' : 'unpaid.'} Customer routed to support.`
+        );
+      } catch {
+        /* ignore */
+      }
+    }
+    await ctx.bot.sendMessage(chatId, '✅ Cancelled. No replacement was available — the customer was directed to support.');
+  }
 }
 
 export async function listJobs(ctx, chatId, telegramId) {

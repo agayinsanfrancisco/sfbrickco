@@ -310,6 +310,9 @@ export function createBot() {
       else if (data === 'exp:addr') await expert.promptSetAddress(ctx, chatId, telegramId);
       else if (data === 'exp:rate') await expert.promptSetRate(ctx, chatId, telegramId);
       else if (data === 'exp:avail') await expert.showAvailability(ctx, chatId, telegramId);
+      else if (data === 'exp:jobs') await expert.showMyJobs(ctx, chatId, telegramId);
+      else if (data.startsWith('exp:cancel:'))
+        await expert.cancelJob(ctx, chatId, telegramId, sliceAfter(data, 'exp:cancel:'));
       else if (data.startsWith('exp:acc:'))
         await expert.accept(ctx, chatId, telegramId, sliceAfter(data, 'exp:acc:'));
       else if (data.startsWith('exp:dec:'))
