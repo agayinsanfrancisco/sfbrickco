@@ -138,10 +138,11 @@ export async function builderPortal(ctx, chatId, telegramId) {
       const cust = await getUserByTelegramId(b.customer_telegram_id);
       const who = cust?.username ? `@${cust.username}` : `id ${b.customer_telegram_id}`;
       const pay = b.payment_status === 'paid' ? '✅ paid' : '⏳ awaiting payment';
+      const net = Math.round((b.service_fee_cents * (100 - config.pricing.platformFeePct)) / 100);
       body +=
         `\n\n🕑 ${fmtHourRange(b.slot_start, b.slot_end)}\n` +
         `📍 ${b.customer_address}\n👤 ${who}\n` +
-        `💵 ${usd(b.total_cents)} — service ${usd(b.service_fee_cents)} + travel ${usd(b.surcharge_cents)} (${pay})`;
+        `💵 You earn *${usd(net)}* (customer pays ${usd(b.total_cents)}) — ${pay}`;
     }
   }
   await ctx.bot.sendMessage(chatId, body, {
