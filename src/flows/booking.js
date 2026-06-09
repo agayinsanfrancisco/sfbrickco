@@ -7,6 +7,7 @@ import {
   expertRatingSummary,
   listBookedExpertIdsAt,
   isExpertBookedAt,
+  isExpertTimeOff,
   getUserById,
 } from '../supabase.js';
 import { upcomingDays, hourlySlots, isCovered } from '../lib/slots.js';
@@ -35,7 +36,9 @@ export async function startBooking(ctx, chatId) {
   await ctx.bot.sendMessage(
     chatId,
     `🛠️ *Book an Administrator*\n\n` +
-      `On-site 1-hour session. The Administrator needs a ride to you — how do you want to handle it?`,
+      `An Administrator is a vetted local builder who comes to you for a *1-hour on-site session* to help build, hands-on.\n\n` +
+      `Here’s the flow: ① how they travel → ② day → ③ time → ④ pick your Administrator → ⑤ your address → ⑥ pay.\n\n` +
+      `First — the Administrator needs a ride to you. How do you want to handle it?`,
     {
       parse_mode: 'Markdown',
       reply_markup: {
@@ -86,6 +89,7 @@ export async function pickHour(ctx, chatId, startIso) {
     if (bookedIds.includes(e.id)) continue;
     const windows = await getExpertAvailability(e.id);
     if (windows.length && !isCovered(windows, startIso)) continue;
+    if (await isExpertTimeOff(e.id, startIso)) continue;
     const rating = await expertRatingSummary(e.id);
     available.push({ id: e.id, name: adminName(e), rate: e.rate_cents ?? floor, rating });
   }
@@ -115,6 +119,10 @@ export async function chooseAdmin(ctx, chatId, expertId) {
   }
   if (await isExpertBookedAt(expertId, s.data.startIso)) {
     await ctx.bot.sendMessage(chatId, 'That Administrator was just booked for that hour — tap /book to pick another time.');
+    return;
+  }
+  if (await isExpertTimeOff(expertId, s.data.startIso)) {
+    await ctx.bot.sendMessage(chatId, 'That Administrator just blocked off that hour — tap /book to pick another time.');
     return;
   }
   const rate = admin.rate_cents ?? (await serviceFeeCents());

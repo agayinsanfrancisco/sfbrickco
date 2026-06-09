@@ -11,6 +11,7 @@ import {
   getUserByTelegramId,
   getUserById,
   addBuilderInvite,
+  repeatCustomers,
   listInventory,
   setStock,
   listPaidUndispatchedOrders,
@@ -333,6 +334,24 @@ export async function doRefund(ctx, chatId, text) {
   }
 }
 
+// ── Repeat-customer report ───────────────────────────────────────────
+export async function showRepeatCustomers(ctx, chatId, telegramId) {
+  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const rows = await repeatCustomers(2);
+  if (!rows.length) {
+    await ctx.bot.sendMessage(chatId, 'No repeat customers yet — no one has 2+ paid bookings.');
+    return;
+  }
+  const lines = rows
+    .slice(0, 25)
+    .map((r, i) => `${i + 1}. ${r.name} — *${r.count}* bookings · ${usd(r.spentCents)} total`);
+  await ctx.bot.sendMessage(
+    chatId,
+    `🔁 *Repeat customers* (2+ paid bookings)\n_Loyalty + off-platform watch list._\n\n${lines.join('\n')}`,
+    { parse_mode: 'Markdown' }
+  );
+}
+
 // ── Editable fees (#44) ──────────────────────────────────────────────
 export async function showFees(ctx, chatId, telegramId) {
   if (!ensureAdmin(ctx, chatId, telegramId)) return;
@@ -527,7 +546,12 @@ export async function approveApplication(ctx, chatId, telegramId, appId) {
   try {
     await ctx.bot.sendMessage(
       app.telegram_id,
-      '🎉 You’re approved as an Administrator! Tap /builder to set your availability and see open jobs.'
+      '🎉 *You’re approved as an Administrator!*\n\n' +
+        'Two quick steps to start getting booked:\n' +
+        '① Tap /builder → *🗓️ Availability* and turn on the hours you want to work.\n' +
+        '② Confirm your *📍 base address* (used to price travel) and *💲 your rate*.\n\n' +
+        'Customers can then book you directly during your hours. You keep your contact private until a job is paid — coordinate through the bot.',
+      { parse_mode: 'Markdown' }
     );
   } catch {
     /* ignore */

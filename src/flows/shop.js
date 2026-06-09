@@ -44,10 +44,14 @@ export async function startShop(ctx, chatId) {
   const offer = pct > 0
     ? `\n🎁 Grab a *${bonusQty}-pack* to unlock a *${pct}% bonus*${cap > 0 ? ` (up to ${usd(cap)})` : ''} on your first wallet deposit!`
     : '';
-  await ctx.bot.sendMessage(chatId, `🧱 *Shop* — pick a product:${offer}`, {
-    parse_mode: 'Markdown',
-    reply_markup: { inline_keyboard: rows },
-  });
+  await ctx.bot.sendMessage(
+    chatId,
+    `🧱 *Shop*\nTap a product to see pack sizes & prices, then add it to your cart.${offer}`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: { inline_keyboard: rows },
+    }
+  );
 }
 
 export async function chooseProduct(ctx, chatId, sku) {

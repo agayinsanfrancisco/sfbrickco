@@ -755,6 +755,63 @@ export async function listActiveAvailability() {
   return data || [];
 }
 
+// ── Expert one-off time off (specific blocked hours) ─────────────────
+export async function getExpertTimeOff(expertId) {
+  const { data } = await supabase
+    .from('expert_time_off')
+    .select('slot_start')
+    .eq('expert_id', expertId)
+    .order('slot_start', { ascending: true });
+  return (data || []).map((r) => r.slot_start);
+}
+
+export async function isExpertTimeOff(expertId, slotIso) {
+  const { data } = await supabase
+    .from('expert_time_off')
+    .select('id')
+    .eq('expert_id', expertId)
+    .eq('slot_start', slotIso)
+    .limit(1);
+  return (data || []).length > 0;
+}
+
+export async function addExpertTimeOff(expertId, slotIso) {
+  await supabase.from('expert_time_off').upsert(
+    { expert_id: expertId, slot_start: slotIso },
+    { onConflict: 'expert_id,slot_start' }
+  );
+}
+
+export async function removeExpertTimeOff(expertId, slotIso) {
+  await supabase.from('expert_time_off').delete().eq('expert_id', expertId).eq('slot_start', slotIso);
+}
+
+// Repeat customers: everyone with ≥ minBookings PAID bookings, ranked by count.
+// A loyalty signal and an off-platform-circumvention watch list.
+export async function repeatCustomers(minBookings = 2) {
+  const { data } = await supabase
+    .from('bookings')
+    .select('customer_telegram_id, total_cents, created_at')
+    .eq('payment_status', 'paid');
+  const byCust = new Map();
+  for (const b of data || []) {
+    const k = b.customer_telegram_id;
+    const cur = byCust.get(k) || { telegram_id: k, count: 0, spentCents: 0, last: null };
+    cur.count += 1;
+    cur.spentCents += b.total_cents || 0;
+    if (!cur.last || b.created_at > cur.last) cur.last = b.created_at;
+    byCust.set(k, cur);
+  }
+  const rows = [...byCust.values()]
+    .filter((c) => c.count >= minBookings)
+    .sort((a, b) => b.count - a.count || b.spentCents - a.spentCents);
+  for (const r of rows) {
+    const u = await getUserByTelegramId(r.telegram_id);
+    r.name = u?.full_name || (u?.username ? `@${u.username}` : `id ${r.telegram_id}`);
+  }
+  return rows;
+}
+
 // ── Inventory ────────────────────────────────────────────────────────
 export async function getInventory(sku) {
   const { data } = await supabase.from('inventory').select('*').eq('sku', sku).maybeSingle();

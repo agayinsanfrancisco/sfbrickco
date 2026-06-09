@@ -14,6 +14,7 @@ import * as payments from './flows/payments.js';
 import * as account from './flows/account.js';
 import * as wallet from './flows/wallet.js';
 import * as apply from './flows/apply.js';
+import * as relay from './flows/relay.js';
 
 // Simple per-user rate limiter (#23): max N actions per sliding window.
 function makeRateLimiter({ max, windowMs }) {
@@ -52,7 +53,12 @@ export function createBot() {
     const user = await getUserByTelegramId(telegramId);
     await bot.sendMessage(
       chatId,
-      '🧱 *SF Brick Company* 🧱\n\nCustom 3D-printed accessories for building-block brands — plus on-site build help in SF. Pay in crypto or from your wallet.',
+      '🧱 *SF Brick Company* 🧱\n\n' +
+        'Welcome! Here’s what you can do:\n\n' +
+        '🛒 *Shop* — custom 3D-printed accessories & upgrades for building-block brands, shipped to you.\n' +
+        '🛠️ *Book an Administrator* — a vetted local builder comes to you in SF to help build, hands-on.\n' +
+        '💰 *Wallet* — load credit once, then check out in a tap.\n\n' +
+        'Pay in crypto or from your wallet. Tap a button below to start.',
       {
         parse_mode: 'Markdown',
         ...mainMenu({
@@ -187,8 +193,6 @@ export function createBot() {
         await expert.doSetAddress(ctx, chatId, telegramId, msg.text.trim());
       } else if (s.flow === 'expert' && s.step === 'awaiting_rate') {
         await expert.doSetRate(ctx, chatId, telegramId, msg.text.trim());
-      } else if (s.flow === 'expert' && s.step === 'awaiting_availability') {
-        await expert.doSetAvailability(ctx, chatId, telegramId, msg.text);
       } else if (s.flow === 'review' && s.step === 'awaiting_comment') {
         await review.addComment(ctx, chatId, telegramId, msg.text.trim());
       } else if (s.flow === 'wallet' && s.step === 'awaiting_amount') {
@@ -203,6 +207,8 @@ export function createBot() {
         await apply.receiveRate(ctx, chatId, msg.text.trim());
       } else if (s.flow === 'apply' && s.step === 'address') {
         await apply.receiveAddress(ctx, chatId, telegramId, msg.from.username, msg.text.trim());
+      } else if (s.flow === 'relay' && s.step === 'messaging') {
+        await relay.relayMessage(ctx, chatId, telegramId, msg.text.trim());
       } else if (s.flow === 'admin' && s.step === 'awaiting_add_promo') {
         await admin.doAddPromo(ctx, chatId, msg.text);
       }
@@ -218,6 +224,7 @@ export function createBot() {
     const chatId = q.message?.chat?.id;
     const telegramId = q.from.id;
     const data = q.data || '';
+    const messageId = q.message?.message_id;
     if (!allow(telegramId)) {
       bot.answerCallbackQuery(q.id, { text: 'Slow down a moment…' }).catch(() => {});
       return;
@@ -287,6 +294,11 @@ export function createBot() {
         await wallet.payDeposit(ctx, chatId, telegramId, coin, Number.parseInt(cents, 10));
       }
       // Apply to be an Administrator
+      else if (data.startsWith('relay:')) {
+        const [role, bid] = sliceAfter(data, 'relay:').split(':');
+        await relay.startRelay(ctx, chatId, telegramId, bid, role);
+      }
+      // Apply to be an Administrator
       else if (data === 'apply:start') await apply.startApply(ctx, chatId);
       // Account self-service
       else if (data === 'acct:orders') await account.showMyOrders(ctx, chatId, telegramId);
@@ -310,6 +322,14 @@ export function createBot() {
       else if (data === 'exp:addr') await expert.promptSetAddress(ctx, chatId, telegramId);
       else if (data === 'exp:rate') await expert.promptSetRate(ctx, chatId, telegramId);
       else if (data === 'exp:avail') await expert.showAvailability(ctx, chatId, telegramId);
+      else if (data.startsWith('exp:av:')) {
+        const [dow, blockKey] = sliceAfter(data, 'exp:av:').split(':');
+        await expert.toggleAvailBlock(ctx, chatId, telegramId, Number.parseInt(dow, 10), blockKey, messageId);
+      } else if (data === 'exp:avclear') await expert.clearAvailability(ctx, chatId, telegramId, messageId);
+      else if (data === 'exp:avdone') await expert.doneAvailability(ctx, chatId, telegramId);
+      else if (data === 'exp:off') await expert.showTimeOff(ctx, chatId, telegramId);
+      else if (data.startsWith('exp:off:'))
+        await expert.toggleTimeOff(ctx, chatId, telegramId, sliceAfter(data, 'exp:off:'), messageId);
       else if (data === 'exp:jobs') await expert.showMyJobs(ctx, chatId, telegramId);
       else if (data.startsWith('exp:cancel:'))
         await expert.cancelJob(ctx, chatId, telegramId, sliceAfter(data, 'exp:cancel:'));
@@ -325,6 +345,7 @@ export function createBot() {
       // Admin
       else if (data === 'adm:menu') await admin.showMenu(ctx, chatId, telegramId);
       else if (data === 'adm:users') await admin.showUsers(ctx, chatId, telegramId);
+      else if (data === 'adm:repeat') await admin.showRepeatCustomers(ctx, chatId, telegramId);
       else if (data === 'adm:addexpert') await admin.promptAddExpert(ctx, chatId, telegramId);
       else if (data === 'adm:remove') await admin.promptRemove(ctx, chatId, telegramId);
       else if (data === 'adm:bookings') await admin.showBookings(ctx, chatId, telegramId);

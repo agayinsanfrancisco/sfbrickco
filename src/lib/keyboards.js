@@ -110,7 +110,10 @@ export function adminMenu() {
           { text: '🧰 Apps', callback_data: 'adm:apps' },
           { text: '➕ Add', callback_data: 'adm:addexpert' },
         ],
-        [{ text: '➖ Remove user', callback_data: 'adm:remove' }],
+        [
+          { text: '➖ Remove user', callback_data: 'adm:remove' },
+          { text: '🔁 Repeat customers', callback_data: 'adm:repeat' },
+        ],
         hdr('— 📦 Orders & Bookings —'),
         [
           { text: '📦 Open orders', callback_data: 'adm:orders' },

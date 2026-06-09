@@ -553,7 +553,12 @@ export async function confirmBooking(ctx, booking, { auto = false } = {}) {
   if (!paid) return false; // already confirmed
   const when = fmtHourRange(paid.slot_start, paid.slot_end);
   try {
-    await ctx.bot.sendMessage(paid.customer_telegram_id, `✅ Payment confirmed! Your Administrator is booked for ${when}.`);
+    await ctx.bot.sendMessage(
+      paid.customer_telegram_id,
+      `✅ Payment confirmed! Your Administrator is booked for ${when}.\n` +
+        'Need to share gate codes or timing? Message them right here — your contact stays private.',
+      { reply_markup: { inline_keyboard: [[{ text: '💬 Message your Administrator', callback_data: `relay:customer:${paid.id}` }]] } }
+    );
   } catch {
     /* ignore */
   }
@@ -573,7 +578,8 @@ export async function confirmBooking(ctx, booking, { auto = false } = {}) {
         await ctx.bot.sendMessage(
           builder.telegram_id,
           `💰 Payment received — your job for ${when} at ${paid.customer_address} is confirmed.${contact}` +
-            `\n\nPlease coordinate through SF Brick Company; per your agreement, off-platform bookings aren’t allowed.`
+            `\n\nPlease coordinate through SF Brick Company; per your agreement, off-platform bookings aren’t allowed.`,
+          { reply_markup: { inline_keyboard: [[{ text: '💬 Message your customer', callback_data: `relay:admin:${paid.id}` }]] } }
         );
       } catch {
         /* ignore */

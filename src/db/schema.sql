@@ -144,6 +144,17 @@ create table if not exists expert_availability (
 create index if not exists expert_avail_idx on expert_availability (expert_id);
 alter table expert_availability enable row level security;
 
+-- ── Expert one-off time off (specific blocked hours) ─────────────────
+create table if not exists expert_time_off (
+  id          uuid primary key default gen_random_uuid(),
+  expert_id   uuid not null references users(id),
+  slot_start  timestamptz not null,
+  created_at  timestamptz not null default now(),
+  unique (expert_id, slot_start)
+);
+create index if not exists expert_timeoff_idx on expert_time_off (expert_id);
+alter table expert_time_off enable row level security;
+
 -- ── Administrator applications (apply + approval) ────────────────────
 create table if not exists admin_applications (
   id           uuid primary key default gen_random_uuid(),

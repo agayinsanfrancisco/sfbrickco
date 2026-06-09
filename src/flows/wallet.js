@@ -2,7 +2,7 @@ import { config } from '../config.js';
 import * as crypto from '../crypto.js';
 import { usd } from '../lib/format.js';
 import { getBalance, listLedger, createDeposit, nextDerivationIndex } from '../supabase.js';
-import { getBoolSetting } from '../lib/settings.js';
+import { getBoolSetting, getIntSetting } from '../lib/settings.js';
 
 // USD store credit (spend-only). Deposits reuse the order crypto rails: a
 // unique derived address per top-up, auto-credited by the watcher. Requires an
@@ -16,10 +16,18 @@ export async function showWallet(ctx, chatId, telegramId) {
     return;
   }
   const balance = await getBalance(telegramId);
+  const pct = await getIntSetting('deposit_bonus_pct', 0);
+  const cap = await getIntSetting('deposit_bonus_cap_cents', 0);
+  const bonusQty = await getIntSetting('bonus_qualifying_qty', 6);
+  const bonusLine =
+    pct > 0
+      ? `\n\n🎁 Bought a *${bonusQty}-pack*? Your first top-up earns a *${pct}% bonus*${cap > 0 ? ` (up to ${usd(cap)})` : ''}.`
+      : '';
   await ctx.bot.sendMessage(
     chatId,
     `💰 *Your wallet*\n\nBalance: *${usd(balance)}*\n\n` +
-      'Top up with crypto, then pay for orders & bookings instantly from your balance.',
+      'Load credit once with crypto, then check out for orders & bookings in a single tap — no waiting on a new payment each time.' +
+      bonusLine,
     {
       parse_mode: 'Markdown',
       reply_markup: {

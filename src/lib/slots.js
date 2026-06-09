@@ -33,6 +33,20 @@ export function pacificDowHour(iso) {
   return { dow: DOW[wd], hour };
 }
 
+// Preset day-part blocks builders toggle (tap-based availability). Each maps to
+// an [start_hour, end_hour) window when active.
+export const BLOCKS = [
+  { key: 'am', label: '🌅 Morning', start: 9, end: 13 },
+  { key: 'mid', label: '☀️ Afternoon', start: 13, end: 17 },
+  { key: 'pm', label: '🌆 Evening', start: 17, end: 21 },
+];
+
+// Is a given day-part block "on" given the saved windows? On when some window
+// fully spans the block's hours.
+export function blockActive(windows, dow, block) {
+  return windows.some((w) => w.dow === dow && w.start_hour <= block.start && w.end_hour >= block.end);
+}
+
 // Is a slot time covered by any of the given availability windows?
 export function isCovered(windows, iso) {
   if (!windows.length) return true; // no availability configured anywhere → allow all

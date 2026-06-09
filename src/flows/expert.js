@@ -15,13 +15,16 @@ import {
   listBookedExpertIdsAt,
   reassignBooking,
   markBookingCancelled,
+  getExpertTimeOff,
+  isExpertTimeOff,
+  addExpertTimeOff,
+  removeExpertTimeOff,
 } from '../supabase.js';
 import { expertJobKeyboard } from '../lib/keyboards.js';
 import { usd, fmtHourRange, shortRef } from '../lib/format.js';
-import { isCovered } from '../lib/slots.js';
+import { isCovered, BLOCKS, blockActive, upcomingDays, hourlySlots } from '../lib/slots.js';
 
 const DOW_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-const DOW_LOOKUP = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
 
 function ratingLine(summary) {
   return summary.count ? `⭐ ${summary.avg} (${summary.count})` : '⭐ no ratings yet';
@@ -175,51 +178,153 @@ export async function builderPortal(ctx, chatId, telegramId) {
   if (!user.address) await promptSetAddress(ctx, chatId, telegramId);
 }
 
-// ── Availability windows (#22) ───────────────────────────────────────
-function fmtWindows(windows) {
-  if (!windows.length) return '— none set (you’ll be offered all jobs) —';
-  return windows.map((w) => `${DOW_NAMES[w.dow]} ${w.start_hour}:00–${w.end_hour}:00`).join('\n');
+// ── Availability windows (#22) — tap-based weekly grid ───────────────
+// Builders toggle day-part blocks (Morning/Afternoon/Evening) per weekday.
+// Each active block is stored as one [start_hour, end_hour) window. No typing.
+
+function availabilityKeyboard(windows) {
+  const rows = [];
+  // Mon–Sun order (more natural than Sun-first for a work week).
+  for (const dow of [1, 2, 3, 4, 5, 6, 0]) {
+    const row = [{ text: DOW_NAMES[dow], callback_data: 'noop' }];
+    for (const block of BLOCKS) {
+      const on = blockActive(windows, dow, block);
+      row.push({
+        text: `${on ? '✅' : '➕'} ${block.label.split(' ')[1]}`,
+        callback_data: `exp:av:${dow}:${block.key}`,
+      });
+    }
+    rows.push(row);
+  }
+  rows.push([{ text: '🚫 Block a specific time off', callback_data: 'exp:off' }]);
+  rows.push([
+    { text: '🧹 Clear all', callback_data: 'exp:avclear' },
+    { text: '✅ Done', callback_data: 'exp:avdone' },
+  ]);
+  return { reply_markup: { inline_keyboard: rows } };
 }
+
+const AVAIL_HEADER =
+  '🗓️ *Your weekly hours* (Pacific)\n' +
+  'Tap a block to turn it on/off — customers can only book you during your ✅ hours.\n' +
+  '_Leave everything off to be offered every job._\n\n' +
+  'Morning 9–1 · Afternoon 1–5 · Evening 5–9';
 
 export async function showAvailability(ctx, chatId, telegramId) {
   const user = await ensureExpert(ctx, chatId, telegramId);
   if (!user) return;
   const windows = await getExpertAvailability(user.id);
-  ctx.sessions.set(chatId, { flow: 'expert', step: 'awaiting_availability' });
+  await ctx.bot.sendMessage(chatId, AVAIL_HEADER, {
+    parse_mode: 'Markdown',
+    ...availabilityKeyboard(windows),
+  });
+}
+
+export async function toggleAvailBlock(ctx, chatId, telegramId, dow, blockKey, messageId) {
+  const user = await ensureExpert(ctx, chatId, telegramId);
+  if (!user) return;
+  const block = BLOCKS.find((b) => b.key === blockKey);
+  if (!block || Number.isNaN(dow)) return;
+  let windows = await getExpertAvailability(user.id);
+  if (blockActive(windows, dow, block)) {
+    windows = windows.filter((w) => !(w.dow === dow && w.start_hour === block.start && w.end_hour === block.end));
+  } else {
+    windows.push({ dow, start_hour: block.start, end_hour: block.end });
+  }
+  windows = windows.map((w) => ({ dow: w.dow, start_hour: w.start_hour, end_hour: w.end_hour }));
+  await setExpertAvailability(user.id, windows);
+  try {
+    await ctx.bot.editMessageReplyMarkup(availabilityKeyboard(windows).reply_markup, {
+      chat_id: chatId,
+      message_id: messageId,
+    });
+  } catch {
+    /* nothing changed visibly */
+  }
+}
+
+export async function clearAvailability(ctx, chatId, telegramId, messageId) {
+  const user = await ensureExpert(ctx, chatId, telegramId);
+  if (!user) return;
+  await setExpertAvailability(user.id, []);
+  try {
+    await ctx.bot.editMessageReplyMarkup(availabilityKeyboard([]).reply_markup, {
+      chat_id: chatId,
+      message_id: messageId,
+    });
+  } catch {
+    /* ignore */
+  }
+}
+
+export async function doneAvailability(ctx, chatId, telegramId) {
+  const user = await ensureExpert(ctx, chatId, telegramId);
+  if (!user) return;
+  const windows = await getExpertAvailability(user.id);
+  const summary = windows.length
+    ? windows
+        .slice()
+        .sort((a, b) => a.dow - b.dow || a.start_hour - b.start_hour)
+        .map((w) => `${DOW_NAMES[w.dow]} ${w.start_hour}:00–${w.end_hour}:00`)
+        .join(', ')
+    : 'open to every job (no hours set)';
+  await ctx.bot.sendMessage(chatId, `✅ Saved. You’re available: ${summary}.`);
+}
+
+// ── Block specific time off (one-off unavailable hours) ──────────────
+function timeOffKeyboard(slots, blockedSet) {
+  const rows = slots.map((s) => [
+    {
+      text: `${blockedSet.has(s.startIso) ? '🚫 Blocked' : '🟢 Free'} · ${s.dayLabel} ${s.label}`,
+      callback_data: `exp:off:${s.startIso}`,
+    },
+  ]);
+  rows.push([{ text: '⬅️ Back to weekly hours', callback_data: 'exp:avail' }]);
+  return { reply_markup: { inline_keyboard: rows } };
+}
+
+// Upcoming bookable hours in the next-12h window (what a customer could book).
+function upcomingSlots() {
+  const out = [];
+  for (const day of upcomingDays(2)) {
+    for (const s of hourlySlots(day.dateKey)) out.push({ ...s, dayLabel: day.label });
+  }
+  return out;
+}
+
+export async function showTimeOff(ctx, chatId, telegramId) {
+  const user = await ensureExpert(ctx, chatId, telegramId);
+  if (!user) return;
+  const slots = upcomingSlots();
+  if (!slots.length) {
+    await ctx.bot.sendMessage(chatId, 'No bookable hours in the next 12 hours to block right now.');
+    return;
+  }
+  const blocked = new Set(await getExpertTimeOff(user.id));
   await ctx.bot.sendMessage(
     chatId,
-    `🗓️ *Your weekly availability* (Pacific):\n${fmtWindows(windows)}\n\n` +
-      'Send new windows, one per line as `Day Start End` (24h), e.g.\n' +
-      '`Mon 9 17`\n`Sat 10 14`\n\nSend `clear` to remove all, or /start to keep as-is.',
-    { parse_mode: 'Markdown' }
+    '🚫 *Block time off*\nTap an hour to mark yourself unavailable (these are the next-12h hours a customer could book). Tap again to free it up.',
+    { parse_mode: 'Markdown', ...timeOffKeyboard(slots, blocked) }
   );
 }
 
-export async function doSetAvailability(ctx, chatId, telegramId, text) {
-  ctx.sessions.delete(chatId);
-  const user = await getUserByTelegramId(telegramId);
+export async function toggleTimeOff(ctx, chatId, telegramId, slotIso, messageId) {
+  const user = await ensureExpert(ctx, chatId, telegramId);
   if (!user) return;
-  if (String(text).trim().toLowerCase() === 'clear') {
-    await setExpertAvailability(user.id, []);
-    await ctx.bot.sendMessage(chatId, '✅ Availability cleared — you’ll be offered all jobs.');
-    return;
+  if (await isExpertTimeOff(user.id, slotIso)) {
+    await removeExpertTimeOff(user.id, slotIso);
+  } else {
+    await addExpertTimeOff(user.id, slotIso);
   }
-  const windows = [];
-  for (const raw of String(text).split('\n')) {
-    const m = raw.trim().match(/^([A-Za-z]{3})\s+(\d{1,2})\s+(\d{1,2})$/);
-    if (!m) continue;
-    const dow = DOW_LOOKUP[m[1].toLowerCase()];
-    const start = Number.parseInt(m[2], 10);
-    const end = Number.parseInt(m[3], 10);
-    if (dow === undefined || start < 0 || start > 23 || end < 1 || end > 24 || end <= start) continue;
-    windows.push({ dow, start_hour: start, end_hour: end });
+  const blocked = new Set(await getExpertTimeOff(user.id));
+  try {
+    await ctx.bot.editMessageReplyMarkup(timeOffKeyboard(upcomingSlots(), blocked).reply_markup, {
+      chat_id: chatId,
+      message_id: messageId,
+    });
+  } catch {
+    /* ignore */
   }
-  if (!windows.length) {
-    await ctx.bot.sendMessage(chatId, 'Couldn’t parse any windows. Example: `Mon 9 17`', { parse_mode: 'Markdown' });
-    return;
-  }
-  await setExpertAvailability(user.id, windows);
-  await ctx.bot.sendMessage(chatId, `✅ Availability saved:\n${fmtWindows(windows)}`, { parse_mode: 'Markdown' });
 }
 
 // ── Manage my jobs (cancel → reassign to next free, else support) ────
@@ -230,6 +335,7 @@ async function findReplacementAdmin(slotIso, excludeId) {
     if (e.id === excludeId || bookedIds.includes(e.id)) continue;
     const windows = await getExpertAvailability(e.id);
     if (windows.length && !isCovered(windows, slotIso)) continue;
+    if (await isExpertTimeOff(e.id, slotIso)) continue;
     return e;
   }
   return null;
@@ -383,6 +489,7 @@ export async function notifyExpertsOfOpenBooking(ctx, booking) {
   for (const e of experts) {
     const windows = await getExpertAvailability(e.id);
     if (windows.length && !isCovered(windows, booking.slot_start)) continue;
+    if (await isExpertTimeOff(e.id, booking.slot_start)) continue;
     try {
       await ctx.bot.sendMessage(e.telegram_id, `📨 New open job:\n\n${openJobCard(booking)}`, {
         parse_mode: 'Markdown',

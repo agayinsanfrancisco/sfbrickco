@@ -4,12 +4,18 @@ import { createApplication } from '../supabase.js';
 // Multi-step application to become an Administrator. Anyone can apply; the owner
 // reviews + approves in the owner panel.
 export async function startApply(ctx, chatId) {
+  const fee = config.pricing.platformFeePct;
   ctx.sessions.set(chatId, { flow: 'apply', step: 'name', data: {} });
   await ctx.bot.sendMessage(
     chatId,
     '🧰 *Apply to be an Administrator*\n\n' +
-      'We bring on vetted local builders to take on-site jobs. A few quick questions.\n\n' +
-      'First — what’s your *full name*?',
+      'Administrators are vetted local builders who take *on-site, 1-hour sessions* helping customers build. Here’s what you’re signing up for:\n\n' +
+      `• 💲 *You set your own rate* per session. We keep a *${fee}% platform fee*; you keep *${100 - fee}%*.\n` +
+      '• 🗓️ *You set your hours* — customers can only book you when you’re available, and you can block time off anytime.\n' +
+      '• 📍 You travel to the customer (they cover the ride or a flat travel fee).\n' +
+      '• 💬 You coordinate *through the bot* — customer contact is shared only after they pay, and off-platform bookings aren’t allowed.\n' +
+      '• 🧱 You’re an *independent contractor*, not an employee, and you assume the normal risks of on-site work.\n\n' +
+      'Sound good? A few quick questions.\n\nFirst — what’s your *full name*?',
     { parse_mode: 'Markdown', reply_markup: { force_reply: true, input_field_placeholder: 'Jane Builder' } }
   );
 }
