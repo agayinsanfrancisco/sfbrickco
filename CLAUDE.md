@@ -22,29 +22,44 @@ Data in **Supabase**.
 - `express` — serves `/health` + the static landing page in `public/`
 - OpenStreetMap Nominatim — geocoding for the distance-based Uber surcharge estimate
 
+User-facing roles: **owner** (env `ADMIN_TELEGRAM_IDS`, full `/owner` panel incl.
+Test mode) and **Administrator** (a.k.a. "builder"/"expert" in code/DB — approved
+via `/apply`, does the on-site build-help jobs, per-Administrator rate, platform
+takes a cut). Bookings/orders relay customer ↔ Administrator/store in-bot so no
+real Telegram handle or phone is exposed.
+
 ## Layout
 
 - `index.js` — entrypoint: starts bot + server + review scheduler + payment watcher
-- `src/config.js` — env loading/validation
+- `src/config.js` — env loading/validation (fees, platform %, rate limits, timeouts)
 - `src/supabase.js` — client + all DB helpers
 - `src/crypto.js` — coin registry, USD→coin quote, receive address, payment URI + QR, on-chain confirmation lookup
 - `src/hdwallet.js` — BIP84 address derivation from an account xpub/zpub
 - `src/watcher.js` — polls for incoming payments and marks orders paid (`watchOnce`)
-- `src/flows/payments.js` — payment flow (show address/QR, await confirmation)
 - `src/uber.js` — surcharge estimate (option A) + manual parse (option B)
 - `src/bot.js` — command/callback/text routing, session state
 - `src/server.js` — Express (`/health` + static landing page)
-- `src/flows/` — shop, booking, expert, admin, review, payments
-- `src/lib/` — slots, keyboards, formatting, pricing
-- `src/db/schema.sql` — canonical schema (already applied to the `heauxbot` Supabase project)
+- `src/flows/` — `shop`, `booking`, `expert` (Administrator portal: availability,
+  time-off, jobs, cancel/reassign), `admin` (owner panel: users, pricing, fees,
+  Test mode, reports), `account` (help/orders/forget-me), `apply` (become an
+  Administrator), `wallet` (prepaid balance + buy-a-6-pack bonus), `relay`
+  (in-bot customer ↔ Administrator/store messaging, paid orders/bookings only),
+  `testmode` (owner-only: view-as any role, simulate payments), `review`,
+  `payments`
+- `src/lib/` — `slots` (availability), `keyboards`, `format`, `pricing`, `money`
+  (pure, tested), `sessions`, `settings`, `log`
+- `src/db/schema.sql` — canonical schema (already applied to the `heauxbot` Supabase project); `seed.sql`/`seed_teardown.sql` — demo data for Test mode
 - `public/index.html` — landing page
+- `test/` — vitest unit tests for `pricing`, `uber`, `slots`, `crypto`, `format`, `money`
 
-## Run
+## Build / Test / Run
 
-1. `npm install`
-2. `cp .env.example .env` and fill it in (set `BTC_XPUB`/`LTC_XPUB`, or a static
-   `BTC_ADDRESS`/`LTC_ADDRESS` fallback confirmed manually by an admin)
-3. `npm start`
+- `npm install` — install deps
+- `npm test` — run the vitest suite (`test/*.test.js`, pure logic only)
+- `npm run dev` — `node --watch index.js` (auto-restart on change)
+- `npm start` — `node index.js` (production)
+- Setup: `cp .env.example .env` and fill it in (set `BTC_XPUB`/`LTC_XPUB`, or a
+  static `BTC_ADDRESS`/`LTC_ADDRESS` fallback confirmed manually by an owner)
 
 ## Status / gotchas
 
@@ -55,11 +70,18 @@ Data in **Supabase**.
 - **Payments are crypto, self-custodial.** Preferred path: account xpub/zpub
   yields a unique address per order with automatic on-chain confirmation.
   Fallback (if the matching xpub is empty): a single static address confirmed
-  manually by an admin.
+  manually by an owner.
 - **Uber surcharge:** option A = distance estimate (free Nominatim geocode +
-  per-mile rate); option B = admin confirms the fare manually if geocoding fails.
-- **Rename in progress** ("everything"): package + code done. Still manual:
-  rename the working dir/GitHub repo, rename the Supabase project label in the
-  dashboard, and set the BotFather bot display/about/description (see the
-  user-facing copy: name "SF Brick Company", 3D-printed accessories, crypto).
+  per-mile rate, `UBER_BASE_CENTS`/`UBER_PER_MILE_CENTS`); option B = flat
+  fallback (`UBER_FLAT_FALLBACK_CENTS`) when geocoding fails, an owner can
+  confirm the real fare manually.
+- **Platform fee** on Administrator jobs is `PLATFORM_FEE_PCT` (currently 30%,
+  taken from the Administrator's rate, not added on top of the customer price).
+- **Wallet bonus:** credited on a buyer's first qualifying 6-pack purchase only
+  (once per buyer), not on every order.
+- **Rename done:** working dir, GitHub repo (`agayinsanfrancisco/sfbrickco`), and
+  code/package all say SF Brick Company. Still worth confirming manually: the
+  Supabase project label in the dashboard and the BotFather bot
+  display/about/description match (name "SF Brick Company", 3D-printed
+  accessories, crypto payments).
 - Long-polling bot wants a persistent process (spica via Coolify), not a Worker.
