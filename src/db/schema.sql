@@ -128,6 +128,7 @@ create table if not exists inventory (
   sku                text unique not null,
   name               text not null,
   stock_qty          int not null default 0 check (stock_qty >= 0),
+  min_qty            int not null default 1 check (min_qty >= 1), -- minimum per order for this product
   reserved_qty       int not null default 0,     -- held by pending orders (#39)
   price_mode         text not null default 'unit_bundle',  -- 'unit_bundle' | 'packs'
   unit_price_cents   int,

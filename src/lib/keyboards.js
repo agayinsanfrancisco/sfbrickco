@@ -20,23 +20,19 @@ export function mainMenu({ isExpert, isAdmin } = {}) {
   return { reply_markup: { inline_keyboard: rows } };
 }
 
-export function qtyKeyboard() {
-  return {
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: '1', callback_data: 'shop:qty:1' },
-          { text: '2', callback_data: 'shop:qty:2' },
-          { text: '3', callback_data: 'shop:qty:3' },
-        ],
-        [
-          { text: '6 (bundle)', callback_data: 'shop:qty:6' },
-          { text: '12 (bundle)', callback_data: 'shop:qty:12' },
-        ],
-        [{ text: 'Other amount…', callback_data: 'shop:qty:custom' }],
-      ],
-    },
-  };
+// Quantity presets, filtered/shifted so the smallest option is the product's
+// minimum order quantity. A min of 10 offers 10/12/25/50, not 1/2/3.
+export function qtyKeyboard(minQty = 1) {
+  const base = [1, 2, 3, 6, 12, 25, 50];
+  const opts = base.filter((n) => n >= minQty);
+  if (!opts.length || opts[0] > minQty) opts.unshift(minQty);
+  const uniq = [...new Set(opts)].slice(0, 6);
+  const rows = [];
+  for (let i = 0; i < uniq.length; i += 3) {
+    rows.push(uniq.slice(i, i + 3).map((n) => ({ text: String(n), callback_data: `shop:qty:${n}` })));
+  }
+  rows.push([{ text: 'Other amount…', callback_data: 'shop:qty:custom' }]);
+  return { reply_markup: { inline_keyboard: rows } };
 }
 
 export function daysKeyboard(days) {

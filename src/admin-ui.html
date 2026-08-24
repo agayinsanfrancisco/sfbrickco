@@ -226,10 +226,11 @@ async function render() {
           <td><button class="act" onclick="act('/users/${u.telegram_id}/active?on=${u.active ? 0 : 1}','${u.active ? 'Deactivated' : 'Activated'}')">${u.active ? 'Deactivate' : 'Activate'}</button></td></tr>`));
     } else if (cur === 'Inventory') {
       const items = await api('/inventory');
-      v.innerHTML = table(['Product', 'SKU', 'Stock', 'Price', ''],
+      v.innerHTML = table(['Product', 'SKU', 'Stock', 'Price $', 'Min / order', ''],
         items.map((it) => `<tr><td>${esc(it.name)}</td><td>${esc(it.sku)}</td>
           <td><input id="stk-${it.sku}" size="4" value="${it.stock_qty}"></td>
           <td><input id="prc-${it.sku}" size="6" value="${((it.unit_price_cents||0)/100).toFixed(2)}"></td>
+          <td><input id="min-${it.sku}" size="4" value="${it.min_qty ?? 1}"></td>
           <td><button class="act primary" onclick="saveItem('${it.sku}')">Save</button></td></tr>`));
     }
   } catch (err) {
@@ -265,9 +266,11 @@ async function setRole(tid) {
 async function saveItem(sku) {
   const qty = document.getElementById('stk-' + sku).value;
   const dollars = document.getElementById('prc-' + sku).value;
+  const min = document.getElementById('min-' + sku).value;
   try {
     await api(`/inventory/${sku}/stock`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ qty: Number(qty) }) });
     await api(`/inventory/${sku}/price`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dollars: Number(dollars) }) });
+    await api(`/inventory/${sku}/min`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ min: Number(min) }) });
     toast('Saved'); refresh();
   } catch (err) { toast('⚠ ' + err.message); }
 }
