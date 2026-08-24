@@ -61,6 +61,11 @@ const WAIVER_BOOKING =
   '• You are at least 18, you authorize entry to the address you provided, and you enter this agreement knowingly and voluntarily.\n\n' +
   'Do you agree?';
 
+// Full legal text for the 📄 Terms buttons on review/confirm cards.
+export function waiverText(kind) {
+  return kind === 'b' ? WAIVER_BOOKING : WAIVER_ORDER;
+}
+
 export async function presentWaiver(ctx, chatId, kind, ref) {
   await ctx.bot.sendMessage(chatId, kind === 'b' ? WAIVER_BOOKING : WAIVER_ORDER, {
     parse_mode: 'Markdown',

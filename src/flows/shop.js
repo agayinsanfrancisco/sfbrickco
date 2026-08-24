@@ -15,7 +15,7 @@ import { qtyKeyboard } from '../lib/keyboards.js';
 import { usd, shortRef } from '../lib/format.js';
 import { getBoolSetting, getIntSetting } from '../lib/settings.js';
 import { deliveryAfterThreshold, cartSubtotalCents } from '../lib/money.js';
-import { presentWaiver } from './payments.js';
+import { acceptWaiver } from './payments.js';
 
 // Cart lives in the session as `cart: [{ sku, name, qty, line_cents }]`.
 function getCart(ctx, chatId) {
@@ -186,14 +186,26 @@ export async function clearCart(ctx, chatId) {
   await ctx.bot.sendMessage(chatId, '🗑️ Cart cleared.');
 }
 
-async function askStreet(ctx, chatId) {
-  await ctx.bot.sendMessage(chatId, '📍 What’s your *street address*?', {
-    parse_mode: 'Markdown',
-    reply_markup: { force_reply: true, input_field_placeholder: '123 Main St' },
-  });
+async function askAddress(ctx, chatId) {
+  await ctx.bot.sendMessage(
+    chatId,
+    '📍 What’s your *delivery address*? One message — street, city, ZIP.',
+    {
+      parse_mode: 'Markdown',
+      reply_markup: { force_reply: true, input_field_placeholder: '123 Main St, San Francisco, 94110' },
+    }
+  );
 }
 
-// Checkout the whole cart → collect delivery address (street → city → ZIP).
+// One-line address → normalized. If they only give a street, assume SF.
+function normalizeAddress(text) {
+  let a = String(text).replace(/\s+/g, ' ').trim();
+  if (!/san francisco|sf\b/i.test(a)) a += ', San Francisco, CA';
+  else if (!/\bCA\b|california/i.test(a)) a += ', CA';
+  return a;
+}
+
+// Checkout the whole cart → one-line delivery address.
 export async function checkout(ctx, chatId) {
   const cart = getCart(ctx, chatId);
   if (!cart.length) {
@@ -202,7 +214,7 @@ export async function checkout(ctx, chatId) {
   }
   const last = await lastDeliveryAddress(chatId);
   const s = ctx.sessions.get(chatId) || {};
-  ctx.sessions.set(chatId, { ...keepCheckout(s), flow: 'shop', cart, step: 'awaiting_street', lastAddr: last });
+  ctx.sessions.set(chatId, { ...keepCheckout(s), flow: 'shop', cart, step: 'awaiting_address', lastAddr: last });
   if (last) {
     await ctx.bot.sendMessage(chatId, `📍 Deliver to your last address?\n${last}`, {
       reply_markup: {
@@ -213,50 +225,29 @@ export async function checkout(ctx, chatId) {
       },
     });
   } else {
-    await askStreet(ctx, chatId);
+    await askAddress(ctx, chatId);
   }
 }
 
 export async function promptNewAddress(ctx, chatId) {
   const s = ctx.sessions.get(chatId) || {};
-  ctx.sessions.set(chatId, { ...s, step: 'awaiting_street' });
-  await askStreet(ctx, chatId);
+  ctx.sessions.set(chatId, { ...s, step: 'awaiting_address' });
+  await askAddress(ctx, chatId);
 }
 
 export async function useLastAddress(ctx, chatId) {
   const s = ctx.sessions.get(chatId);
   if (!s?.lastAddr) {
-    await askStreet(ctx, chatId);
+    await askAddress(ctx, chatId);
     return;
   }
   await addressComplete(ctx, chatId, s.lastAddr);
 }
 
-export async function receiveStreet(ctx, chatId, street) {
+export async function receiveAddress(ctx, chatId, text) {
   const s = ctx.sessions.get(chatId);
-  if (s?.flow !== 'shop' || s.step !== 'awaiting_street') return;
-  ctx.sessions.set(chatId, { ...s, step: 'awaiting_city', street });
-  await ctx.bot.sendMessage(chatId, 'And the *city*?', {
-    parse_mode: 'Markdown',
-    reply_markup: { force_reply: true, input_field_placeholder: 'San Francisco' },
-  });
-}
-
-export async function receiveCity(ctx, chatId, city) {
-  const s = ctx.sessions.get(chatId);
-  if (s?.flow !== 'shop' || s.step !== 'awaiting_city') return;
-  ctx.sessions.set(chatId, { ...s, step: 'awaiting_zip', city });
-  await ctx.bot.sendMessage(chatId, 'And your *ZIP code*?', {
-    parse_mode: 'Markdown',
-    reply_markup: { force_reply: true, input_field_placeholder: '94110' },
-  });
-}
-
-export async function receiveZip(ctx, chatId, zip) {
-  const s = ctx.sessions.get(chatId);
-  if (s?.flow !== 'shop' || s.step !== 'awaiting_zip') return;
-  const address = `${s.street}, ${s.city}, CA ${zip}`.replace(/\s+/g, ' ').trim();
-  await addressComplete(ctx, chatId, address);
+  if (s?.flow !== 'shop' || s.step !== 'awaiting_address') return;
+  await addressComplete(ctx, chatId, normalizeAddress(text));
 }
 
 async function addressComplete(ctx, chatId, address) {
@@ -294,17 +285,66 @@ export async function receivePhone(ctx, chatId, telegramId, phone, handle) {
   const s = ctx.sessions.get(chatId);
   if (!s?.cart?.length || s.step !== 'awaiting_phone') return;
   const skipped = !phone || phone.startsWith('⏭️ Skip');
-  ctx.sessions.set(chatId, { ...s, step: 'awaiting_note', phone: skipped ? null : phone, handle: handle || null });
+  ctx.sessions.set(chatId, { ...s, phone: skipped ? null : phone, handle: handle || null });
+  await showReview(ctx, chatId);
+}
+
+// Review-and-confirm: the customer sees the full total BEFORE the order
+// exists. The sale terms are agreed on the same tap (full text via 📄).
+export async function showReview(ctx, chatId) {
+  const s = ctx.sessions.get(chatId);
+  if (!s?.cart?.length) return;
+  ctx.sessions.set(chatId, { ...s, step: 'reviewing' });
+  const subtotal = cartSubtotalCents(s.cart);
+  const threshold = await getIntSetting('free_delivery_threshold_cents', 0);
+  const deliveryFee = deliveryAfterThreshold(subtotal, s.deliveryFee, threshold);
+  const discount = s.upsellPercent ? Math.round((subtotal * s.upsellPercent) / 100) : 0;
+  const total = subtotal + deliveryFee - discount;
+  const lines = s.cart.map((i) => `• ${i.name} ×${i.qty}`).join('\n');
   await ctx.bot.sendMessage(
     chatId,
-    `${skipped ? '👍 No problem — we’ll reach you on Telegram.\n\n' : ''}📝 Any delivery notes (gate code, unit #, drop-off spot)? Type a message, or tap Skip.`,
-    { reply_markup: { inline_keyboard: [[{ text: 'Skip', callback_data: 'shop:noteskip' }]] } }
+    `🧾 *Review your order*\n${lines}\n📍 ${s.address}\n` +
+      `${s.note ? `📝 ${s.note}\n` : ''}` +
+      `Subtotal ${usd(subtotal)} · Delivery ${deliveryFee ? usd(deliveryFee) : 'free'}` +
+      `${discount ? ` · Discount −${usd(discount)}` : ''}\n💵 *Total ${usd(total)}*\n\n` +
+      `_By continuing you agree to our sale terms (📄)._`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: `✅ Agree & continue to payment`, callback_data: 'shop:confirm' }],
+          [
+            { text: s.note ? '📝 Edit note' : '📝 Add a note', callback_data: 'shop:note' },
+            { text: '📄 Terms', callback_data: 'shop:terms' },
+          ],
+          [{ text: '✖ Cancel', callback_data: 'shop:cocancel' }],
+        ],
+      },
+    }
   );
 }
 
-async function finalizeOrder(ctx, chatId, telegramId, note) {
+export async function promptNote(ctx, chatId) {
   const s = ctx.sessions.get(chatId);
-  if (!s?.cart?.length || s.step !== 'awaiting_note') return;
+  if (!s?.cart?.length || s.step !== 'reviewing') return;
+  ctx.sessions.set(chatId, { ...s, step: 'awaiting_note' });
+  await ctx.bot.sendMessage(chatId, '📝 Delivery note (gate code, unit #, drop-off spot):', {
+    reply_markup: { force_reply: true },
+  });
+}
+
+export async function cancelCheckout(ctx, chatId) {
+  const s = ctx.sessions.get(chatId);
+  ctx.sessions.set(chatId, { flow: 'shop', cart: s?.cart || [], upsellPercent: s?.upsellPercent });
+  await ctx.bot.sendMessage(chatId, '✖ Checkout cancelled — your cart is saved. Tap /shop anytime.', {
+    reply_markup: { remove_keyboard: true },
+  });
+}
+
+export async function confirmOrder(ctx, chatId, telegramId) {
+  const s = ctx.sessions.get(chatId);
+  if (!s?.cart?.length || s.step !== 'reviewing') return;
+  const note = s.note || null;
   ctx.sessions.delete(chatId);
   const cart = s.cart;
   const subtotal = cartSubtotalCents(cart);
@@ -348,13 +388,13 @@ async function finalizeOrder(ctx, chatId, telegramId, note) {
       : `✅ Order *${shortRef(order.id)}* created — thanks!`,
     { parse_mode: 'Markdown', reply_markup: { remove_keyboard: true } }
   );
-  await presentWaiver(ctx, chatId, 'o', order.id);
+  await acceptWaiver(ctx, chatId, telegramId, 'o', order.id);
 }
 
+// Optional note typed from the review card → back to the review card.
 export async function receiveNote(ctx, chatId, telegramId, text) {
-  await finalizeOrder(ctx, chatId, telegramId, text);
-}
-
-export async function skipNote(ctx, chatId, telegramId) {
-  await finalizeOrder(ctx, chatId, telegramId, null);
+  const s = ctx.sessions.get(chatId);
+  if (!s?.cart?.length || s.step !== 'awaiting_note') return;
+  ctx.sessions.set(chatId, { ...s, note: String(text).slice(0, 300) });
+  await showReview(ctx, chatId);
 }

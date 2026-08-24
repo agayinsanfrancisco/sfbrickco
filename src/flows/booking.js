@@ -11,12 +11,13 @@ import {
   getUserById,
   getBooking,
   rescheduleBooking,
+  recordBookingWaiver,
 } from '../supabase.js';
 import { upcomingDays, hourlySlots, isCovered } from '../lib/slots.js';
 import { daysKeyboard, hoursKeyboard } from '../lib/keyboards.js';
 import { usd, fmtHourRange, mdEscape } from '../lib/format.js';
 import { getIntSetting, getBoolSetting } from '../lib/settings.js';
-import { presentWaiver } from './payments.js';
+import { presentWaiver, presentBookingMethods, waiverText } from './payments.js';
 
 // Service fee: admin-editable setting, falling back to the env-derived default.
 // Used as the price floor when a Block Expert hasn't set their own rate.
@@ -39,7 +40,7 @@ export async function startBooking(ctx, chatId) {
     chatId,
     `🛠️ *Book a Block Expert*\n\n` +
       `A Block Expert is a vetted local builder who comes to you for a *1-hour on-site session* to help build, hands-on.\n\n` +
-      `Here’s the flow: ① how they travel → ② day → ③ time → ④ pick your Block Expert → ⑤ your address → ⑥ pay.\n\n` +
+      `Here’s the flow: ① travel → ② day & time → ③ pick your Block Expert → ④ address → ⑤ confirm & pay.\n\n` +
       `First — the Block Expert needs a ride to you. How do you want to handle it?`,
     {
       parse_mode: 'Markdown',
@@ -128,39 +129,25 @@ export async function chooseAdmin(ctx, chatId, expertId) {
     return;
   }
   const rate = admin.rate_cents ?? (await serviceFeeCents());
-  ctx.sessions.set(chatId, { ...s, step: 'awaiting_street', expertId, adminName: adminName(admin), adminRate: rate });
-  await ctx.bot.sendMessage(chatId, `Booking *${adminName(admin)}*. What’s your *street address*?`, {
-    parse_mode: 'Markdown',
-    reply_markup: { force_reply: true, input_field_placeholder: '123 Main St' },
-  });
+  ctx.sessions.set(chatId, { ...s, step: 'awaiting_address', expertId, adminName: adminName(admin), adminRate: rate });
+  await ctx.bot.sendMessage(
+    chatId,
+    `Booking *${adminName(admin)}*. What’s your *address*? One message — street, city, ZIP.`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: { force_reply: true, input_field_placeholder: '123 Main St, San Francisco, 94110' },
+    }
+  );
 }
 
-// Address collected in pieces (street → city → ZIP) and combined.
-export async function receiveStreet(ctx, chatId, street) {
+// One-line address → confirm card (terms agreed on the same tap).
+export async function receiveAddress(ctx, chatId, telegramId, text) {
   const s = ctx.sessions.get(chatId);
-  if (s?.flow !== 'book' || s.step !== 'awaiting_street') return;
-  ctx.sessions.set(chatId, { ...s, step: 'awaiting_city', data: { ...s.data, street } });
-  await ctx.bot.sendMessage(chatId, 'And the *city*?', {
-    parse_mode: 'Markdown',
-    reply_markup: { force_reply: true, input_field_placeholder: 'San Francisco' },
-  });
-}
-
-export async function receiveCity(ctx, chatId, city) {
-  const s = ctx.sessions.get(chatId);
-  if (s?.flow !== 'book' || s.step !== 'awaiting_city') return;
-  ctx.sessions.set(chatId, { ...s, step: 'awaiting_zip', data: { ...s.data, city } });
-  await ctx.bot.sendMessage(chatId, 'And your *ZIP code*?', {
-    parse_mode: 'Markdown',
-    reply_markup: { force_reply: true, input_field_placeholder: '94110' },
-  });
-}
-
-export async function receiveZip(ctx, chatId, telegramId, zip) {
-  const s = ctx.sessions.get(chatId);
-  if (s?.flow !== 'book' || s.step !== 'awaiting_zip' || !s.data?.startIso) return;
-  const { startIso, endIso, street, city } = s.data;
-  const address = `${street}, ${city}, CA ${zip}`.replace(/\s+/g, ' ').trim();
+  if (s?.flow !== 'book' || s.step !== 'awaiting_address' || !s.data?.startIso) return;
+  const { startIso, endIso } = s.data;
+  let address = String(text).replace(/\s+/g, ' ').trim();
+  if (!/san francisco|sf\b/i.test(address)) address += ', San Francisco, CA';
+  else if (!/\bCA\b|california/i.test(address)) address += ', CA';
   ctx.sessions.set(chatId, { ...s, step: 'awaiting_confirm', data: { startIso, endIso, address } });
   const fee = s.adminRate ?? (await serviceFeeCents());
   const surcharge = s.ownRide ? 0 : config.uber.flatFallbackCents;
@@ -170,17 +157,24 @@ export async function receiveZip(ctx, chatId, telegramId, zip) {
     : `💵 *${usd(total)}* (${usd(fee)} session + ${usd(surcharge)} travel)`;
   await ctx.bot.sendMessage(
     chatId,
-    `Please confirm:\n\n👤 ${mdEscape(s.adminName)}\n🕒 ${fmtHourRange(startIso, endIso)}\n📍 ${mdEscape(address)}\n${costLine}`,
+    `Please confirm:\n\n👤 ${mdEscape(s.adminName)}\n🕒 ${fmtHourRange(startIso, endIso)}\n📍 ${mdEscape(address)}\n${costLine}\n\n_By confirming you agree to the booking terms (📄)._`,
     {
       parse_mode: 'Markdown',
       reply_markup: {
         inline_keyboard: [
-          [{ text: '✅ Confirm & continue to payment', callback_data: 'book:reqok' }],
-          [{ text: '✖ Cancel', callback_data: 'book:cancel' }],
+          [{ text: '✅ Agree & continue to payment', callback_data: 'book:reqok' }],
+          [
+            { text: '📄 Terms', callback_data: 'book:terms' },
+            { text: '✖ Cancel', callback_data: 'book:cancel' },
+          ],
         ],
       },
     }
   );
+}
+
+export async function showTerms(ctx, chatId) {
+  await ctx.bot.sendMessage(chatId, waiverText('b'), { parse_mode: 'Markdown' });
 }
 
 export async function confirmRequest(ctx, chatId, telegramId) {
@@ -235,9 +229,8 @@ export async function confirmRequest(ctx, chatId, telegramId) {
     `📝 *Booked ${mdEscape(chosenName)}* for ${fmtHourRange(startIso, endIso)}\n📍 ${mdEscape(address)}\nTotal *${usd(total)}*.`,
     { parse_mode: 'Markdown' }
   );
-  await presentWaiver(ctx, chatId, 'b', booking.id);
-
-  // Upsell bricks at 20% off, before they pay (#11).
+  await recordBookingWaiver(booking.id);
+  // Upsell first so the payment screen is the last (most actionable) message.
   await ctx.bot.sendMessage(
     chatId,
     `🧱 *While you’re here* — add bricks to your build and take *20% off* your parts order.`,
@@ -246,6 +239,8 @@ export async function confirmRequest(ctx, chatId, telegramId) {
       reply_markup: { inline_keyboard: [[{ text: '🧱 Add bricks (20% off)', callback_data: 'shop:upsell' }]] },
     }
   );
+  await presentBookingMethods(ctx, chatId, booking.id);
+
 }
 
 // A "Pay" button (e.g. a re-show) → waiver gate, then payment methods.
