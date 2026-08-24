@@ -270,7 +270,7 @@ function availabilityKeyboard(windows) {
 // Build the windows for a one-tap preset. Blocks: Morning 9–13, Afternoon
 // 13–17, Evening 17–21. "Weekdays 9–5" = Mon–Fri Morning+Afternoon; the
 // "every day"/"weekends" presets include all three blocks (→ 9–9).
-function presetWindows(preset) {
+export function presetWindows(preset) {
   const day = BLOCKS.filter((b) => b.key !== 'pm'); // Morning + Afternoon → 9–17
   const all = BLOCKS; // 9–21
   const make = (dows, blocks) =>

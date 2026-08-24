@@ -10,7 +10,7 @@ create table if not exists users (
   username      text,
   full_name     text,
   role          text not null default 'customer'
-                  check (role in ('customer', 'expert', 'admin')),
+                  check (role in ('customer', 'expert', 'block_manager', 'store_manager', 'administrator', 'admin')),
   active        boolean not null default true,
   address       text,                          -- Block Expert base/pickup address
   rate_cents    integer,                        -- Block Expert's per-session rate (null = global default)
@@ -176,6 +176,7 @@ create table if not exists admin_applications (
   name         text,
   hours        text,
   rate         text,
+  phone         text,
   base_address text,
   status       text not null default 'pending'
                  check (status in ('pending', 'approved', 'rejected')),

@@ -30,39 +30,56 @@ import {
   listPendingApplications,
   setApplicationStatus,
   promoteToExpert,
+  setUserRate,
+  setUserAddress,
+  setExpertAvailability,
+  getExpertAvailability,
 } from '../supabase.js';
 import { manualSurchargeCents, estimateBetween } from '../uber.js';
+import { effectiveRole, can, canChangeRoleOf, assignableRoles, displayName, displayPhone, ROLE_LABELS, isStaff } from '../lib/roles.js';
 import { adminMenu, adminCategory } from '../lib/keyboards.js';
 import { usd, fmtHourRange, shortRef, orderItemsSummary } from '../lib/format.js';
 import { getIntSetting, getBoolSetting, invalidateSettings } from '../lib/settings.js';
 
-function ensureAdmin(ctx, chatId, telegramId) {
-  if (!isAdminId(telegramId)) {
-    ctx.bot.sendMessage(chatId, 'Admins only.');
-    return false;
+// Resolve the caller's effective staff role: env owners win, then DB role.
+export async function resolveRole(telegramId) {
+  if (isAdminId(telegramId)) return 'owner';
+  return effectiveRole(await getUserByTelegramId(telegramId));
+}
+
+// Capability gate. Returns the caller's role (truthy) or null after telling
+// them they don't have access.
+async function ensureCap(ctx, chatId, telegramId, cap) {
+  const role = await resolveRole(telegramId);
+  if (!can(role, cap)) {
+    await ctx.bot.sendMessage(chatId, '🔒 You don’t have access to that.');
+    return null;
   }
-  return true;
+  return role;
 }
 
 export async function showMenu(ctx, chatId, telegramId) {
-  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const role = await ensureCap(ctx, chatId, telegramId, 'panel');
+  if (!role) return;
   await ctx.bot.sendMessage(
     chatId,
-    '⚙️ *Owner panel*\nPick a category to manage people, orders, catalog or settings.',
-    { parse_mode: 'Markdown', ...adminMenu() }
+    `⚙️ *Staff panel* (${ROLE_LABELS[role]})\nPick a category.`,
+    { parse_mode: 'Markdown', ...adminMenu(role) }
   );
 }
 
 // Open one owner-panel category (drill-down from showMenu).
 export async function showCategory(ctx, chatId, telegramId, cat) {
-  if (!ensureAdmin(ctx, chatId, telegramId)) return;
-  const kb = adminCategory(cat);
+  const role = await ensureCap(ctx, chatId, telegramId, 'panel');
+  if (!role) return;
+  const kb = adminCategory(cat, role);
   if (!kb) return;
   await ctx.bot.sendMessage(chatId, `*${kb.title}*`, { parse_mode: 'Markdown', reply_markup: kb.reply_markup });
 }
 
 export async function showUsers(ctx, chatId, telegramId) {
-  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const role = await ensureCap(ctx, chatId, telegramId, 'view_users');
+  if (!role) return;
   const users = await listUsers();
   if (!users.length) {
     await ctx.bot.sendMessage(chatId, 'No users yet.');
@@ -72,7 +89,7 @@ export async function showUsers(ctx, chatId, telegramId) {
   const shown = users.slice(0, PAGE);
   const lines = shown.map(
     (u) =>
-      `• ${u.full_name || u.username || 'unknown'} — \`${u.telegram_id}\` — ${u.role}${
+      `• ${displayName(role, u.full_name) || u.username || 'unknown'} — \`${u.telegram_id}\` — ${ROLE_LABELS[u.role] || u.role}${
         u.active ? '' : ' (inactive)'
       }`
   );
@@ -81,7 +98,8 @@ export async function showUsers(ctx, chatId, telegramId) {
 }
 
 export async function promptAddExpert(ctx, chatId, telegramId) {
-  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const role = await ensureCap(ctx, chatId, telegramId, 'manage_experts');
+  if (!role) return;
   ctx.sessions.set(chatId, { flow: 'admin', step: 'awaiting_add_expert' });
   await ctx.bot.sendMessage(
     chatId,
@@ -106,7 +124,8 @@ export async function doAddExpert(ctx, chatId, text) {
 }
 
 export async function promptRemove(ctx, chatId, telegramId) {
-  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const role = await ensureCap(ctx, chatId, telegramId, 'manage_roles');
+  if (!role) return;
   ctx.sessions.set(chatId, { flow: 'admin', step: 'awaiting_remove' });
   await ctx.bot.sendMessage(
     chatId,
@@ -132,7 +151,8 @@ export async function doRemove(ctx, chatId, text) {
 
 // List open (unaccepted) bookings with an "assign a builder" affordance.
 export async function showBookings(ctx, chatId, telegramId) {
-  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const role = await ensureCap(ctx, chatId, telegramId, 'manage_experts');
+  if (!role) return;
   const [open, awaitingPay] = await Promise.all([listOpenBookings(), listAwaitingPaymentBookings()]);
   if (!open.length && !awaitingPay.length) {
     await ctx.bot.sendMessage(chatId, 'No open or awaiting-payment bookings.');
@@ -164,7 +184,8 @@ export async function showBookings(ctx, chatId, telegramId) {
 
 // Step 1 of accept-on-behalf: choose which expert to assign.
 export async function chooseExpertForBooking(ctx, chatId, telegramId, bookingId) {
-  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const role = await ensureCap(ctx, chatId, telegramId, 'manage_experts');
+  if (!role) return;
   const experts = await listExperts({ activeOnly: true });
   if (!experts.length) {
     await ctx.bot.sendMessage(chatId, 'No active experts to assign.');
@@ -183,7 +204,8 @@ export async function chooseExpertForBooking(ctx, chatId, telegramId, bookingId)
 
 // Step 2: assign on behalf. Travel/total are already fixed on the booking.
 export async function assignExpert(ctx, chatId, telegramId, bookingId, expertId) {
-  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const role = await ensureCap(ctx, chatId, telegramId, 'manage_experts');
+  if (!role) return;
   const booking = await getBooking(bookingId);
   if (!booking || booking.status !== 'awaiting_acceptance') {
     await ctx.bot.sendMessage(chatId, 'That booking is no longer open.');
@@ -236,7 +258,8 @@ export async function assignExpert(ctx, chatId, telegramId, bookingId, expertId)
 
 // ── Open orders (paid, awaiting dispatch) (#12) ──────────────────────
 export async function showOpenOrders(ctx, chatId, telegramId) {
-  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const role = await ensureCap(ctx, chatId, telegramId, 'manage_orders');
+  if (!role) return;
   const orders = await listPaidUndispatchedOrders();
   if (!orders.length) {
     await ctx.bot.sendMessage(chatId, 'No paid orders awaiting dispatch.');
@@ -246,7 +269,7 @@ export async function showOpenOrders(ctx, chatId, telegramId) {
     const total = (o.amount_cents || 0) + (o.delivery_fee_cents || 0);
     await ctx.bot.sendMessage(
       chatId,
-      `📦 *${shortRef(o.id)}* — ${orderItemsSummary(o)}\n📍 ${o.delivery_address}\n📞 ${o.contact_phone || '—'}` +
+      `📦 *${shortRef(o.id)}* — ${orderItemsSummary(o)}\n📍 ${o.delivery_address}\n📞 ${displayPhone(role, o.contact_phone)}` +
         `${o.notes ? `\n📝 ${o.notes}` : ''}\n${usd(total)}`,
       {
         parse_mode: 'Markdown',
@@ -258,7 +281,8 @@ export async function showOpenOrders(ctx, chatId, telegramId) {
 
 // ── Broadcast (#28) ──────────────────────────────────────────────────
 export async function promptBroadcast(ctx, chatId, telegramId) {
-  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const role = await ensureCap(ctx, chatId, telegramId, 'broadcast');
+  if (!role) return;
   ctx.sessions.set(chatId, { flow: 'admin', step: 'awaiting_broadcast' });
   await ctx.bot.sendMessage(chatId, 'Send the message to broadcast to all customers (or /start to cancel):');
 }
@@ -281,7 +305,8 @@ export async function doBroadcast(ctx, chatId, text) {
 
 // ── Order lookup by ref (#38) ────────────────────────────────────────
 export async function promptFindOrder(ctx, chatId, telegramId) {
-  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const role = await ensureCap(ctx, chatId, telegramId, 'manage_orders');
+  if (!role) return;
   ctx.sessions.set(chatId, { flow: 'admin', step: 'awaiting_find_order' });
   await ctx.bot.sendMessage(chatId, 'Send an order ref (e.g. SFB-3F9A2C):');
 }
@@ -310,7 +335,7 @@ export async function doFindOrder(ctx, chatId, text) {
   await ctx.bot.sendMessage(
     chatId,
     `🧾 *${shortRef(o.id)}*\n${orderItemsSummary(o)} · ${usd(total)}\nStatus: *${o.status}*\n` +
-      `📍 ${o.delivery_address || '—'}\n📞 ${o.contact_phone || '—'}` +
+      `📍 ${o.delivery_address || '—'}\n📞 ${displayPhone(role, o.contact_phone)}` +
       `${o.notes ? `\n📝 ${o.notes}` : ''}${o.pay_txid ? `\n🔗 \`${o.pay_txid}\`` : ''}`,
     {
       parse_mode: 'Markdown',
@@ -321,7 +346,8 @@ export async function doFindOrder(ctx, chatId, text) {
 
 // ── Refund recording (#37) ───────────────────────────────────────────
 export async function promptRefund(ctx, chatId, telegramId, kind, ref) {
-  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const role = await ensureCap(ctx, chatId, telegramId, 'refunds');
+  if (!role) return;
   ctx.sessions.set(chatId, { flow: 'admin', step: 'awaiting_refund_txid', data: { kind, ref } });
   await ctx.bot.sendMessage(chatId, 'Send the refund transaction id (or type "none"):');
 }
@@ -351,7 +377,8 @@ export async function doRefund(ctx, chatId, text) {
 // already been paid out. "Mark paid" records the transfer (you send the funds
 // however you like — this is the ledger).
 export async function showPayouts(ctx, chatId, telegramId) {
-  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const role = await ensureCap(ctx, chatId, telegramId, 'payouts');
+  if (!role) return;
   const { earned, paid } = await builderPayoutData();
   const fee = config.pricing.platformFeePct;
   const byExpert = new Map();
@@ -389,7 +416,8 @@ export async function showPayouts(ctx, chatId, telegramId) {
 }
 
 export async function doPayout(ctx, chatId, telegramId, expertId, amountCents) {
-  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const role = await ensureCap(ctx, chatId, telegramId, 'payouts');
+  if (!role) return;
   const amount = Number.parseInt(amountCents, 10);
   if (!Number.isInteger(amount) || amount <= 0) return;
   await recordPayout(expertId, amount, 'owner-marked');
@@ -413,7 +441,8 @@ function toCsv(rows, columns) {
 }
 
 export async function exportCsv(ctx, chatId, telegramId) {
-  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const role = await ensureCap(ctx, chatId, telegramId, 'reports');
+  if (!role) return;
   const { orders, bookings } = await exportRows();
   const orderCols = ['id', 'created_at', 'telegram_id', 'sku', 'qty', 'amount_cents', 'delivery_fee_cents', 'discount_cents', 'status', 'payment_method', 'pay_coin', 'crypto_amount', 'pay_txid', 'delivery_address'];
   const bookingCols = ['id', 'created_at', 'customer_telegram_id', 'expert_id', 'slot_start', 'slot_end', 'service_fee_cents', 'surcharge_cents', 'total_cents', 'payment_status', 'status', 'pay_coin', 'crypto_amount', 'pay_txid', 'customer_address'];
@@ -434,7 +463,8 @@ export async function exportCsv(ctx, chatId, telegramId) {
 
 // ── Repeat-customer report ───────────────────────────────────────────
 export async function showRepeatCustomers(ctx, chatId, telegramId) {
-  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const role = await ensureCap(ctx, chatId, telegramId, 'reports');
+  if (!role) return;
   const rows = await repeatCustomers(2);
   if (!rows.length) {
     await ctx.bot.sendMessage(chatId, 'No repeat customers yet — no one has 2+ paid bookings.');
@@ -455,7 +485,8 @@ export async function showRepeatCustomers(ctx, chatId, telegramId) {
 
 // ── Editable fees (#44) ──────────────────────────────────────────────
 export async function showFees(ctx, chatId, telegramId) {
-  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const role = await ensureCap(ctx, chatId, telegramId, 'settings');
+  if (!role) return;
   const [service, base, perMile, pct, cap, qty] = await Promise.all([
     getIntSetting('service_fee_cents', config.pricing.serviceFeeCents),
     getIntSetting('uber_base_cents', config.uber.baseCents),
@@ -504,7 +535,8 @@ const INT_KEYS = {
 };
 
 export async function promptSetFee(ctx, chatId, telegramId, which) {
-  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const role = await ensureCap(ctx, chatId, telegramId, 'settings');
+  if (!role) return;
   if (!FEE_KEYS[which] && !INT_KEYS[which]) return;
   ctx.sessions.set(chatId, { flow: 'admin', step: 'awaiting_fee', data: { which } });
   const unit = INT_KEYS[which]
@@ -541,7 +573,8 @@ export async function doSetFee(ctx, chatId, text) {
 
 // ── Price editing + add SKU (#29) ────────────────────────────────────
 export async function promptSetPrice(ctx, chatId, telegramId, sku) {
-  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const role = await ensureCap(ctx, chatId, telegramId, 'catalog');
+  if (!role) return;
   ctx.sessions.set(chatId, { flow: 'admin', step: 'awaiting_price', data: { sku } });
   await ctx.bot.sendMessage(
     chatId,
@@ -575,7 +608,8 @@ export async function doSetPrice(ctx, chatId, text) {
 }
 
 export async function promptAddSku(ctx, chatId, telegramId) {
-  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const role = await ensureCap(ctx, chatId, telegramId, 'catalog');
+  if (!role) return;
   ctx.sessions.set(chatId, { flow: 'admin', step: 'awaiting_add_sku' });
   await ctx.bot.sendMessage(
     chatId,
@@ -604,7 +638,8 @@ export async function doAddSku(ctx, chatId, text) {
 
 // ── Block Expert applications (approval flow) ───────────────────────
 export async function showApplications(ctx, chatId, telegramId) {
-  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const role = await ensureCap(ctx, chatId, telegramId, 'approve_applications');
+  if (!role) return;
   const apps = await listPendingApplications();
   if (!apps.length) {
     await ctx.bot.sendMessage(chatId, 'No pending Block Expert applications.');
@@ -614,7 +649,7 @@ export async function showApplications(ctx, chatId, telegramId) {
     await ctx.bot.sendMessage(
       chatId,
       `🧰 *Application*\n👤 ${a.name}${a.username ? ` (@${a.username})` : ''}\n` +
-        `🕑 ${a.hours}\n💲 ${a.rate}\n📍 ${a.base_address}`,
+        `🕑 ${a.hours}\n💲 ${a.rate}\n📞 ${a.phone || '—'}\n📍 ${a.base_address}`,
       {
         parse_mode: 'Markdown',
         reply_markup: {
@@ -631,7 +666,8 @@ export async function showApplications(ctx, chatId, telegramId) {
 }
 
 export async function approveApplication(ctx, chatId, telegramId, appId) {
-  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const role = await ensureCap(ctx, chatId, telegramId, 'approve_applications');
+  if (!role) return;
   const app = await setApplicationStatus(appId, 'approved');
   if (!app) {
     await ctx.bot.sendMessage(chatId, 'That application was already handled.');
@@ -661,7 +697,8 @@ export async function approveApplication(ctx, chatId, telegramId, appId) {
 }
 
 export async function rejectApplication(ctx, chatId, telegramId, appId) {
-  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const role = await ensureCap(ctx, chatId, telegramId, 'approve_applications');
+  if (!role) return;
   const app = await setApplicationStatus(appId, 'rejected');
   if (!app) {
     await ctx.bot.sendMessage(chatId, 'That application was already handled.');
@@ -695,7 +732,8 @@ async function featuresKeyboard() {
 }
 
 export async function showFeatures(ctx, chatId, telegramId) {
-  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const role = await ensureCap(ctx, chatId, telegramId, 'settings');
+  if (!role) return;
   await ctx.bot.sendMessage(
     chatId,
     '🎚️ *Features*\nTap to turn a section on or off for customers. Off = hidden + blocked.',
@@ -705,7 +743,8 @@ export async function showFeatures(ctx, chatId, telegramId) {
 
 // Toggle a flag and update the same message in place (no message spam).
 export async function toggleFlag(ctx, chatId, telegramId, key, messageId) {
-  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const role = await ensureCap(ctx, chatId, telegramId, 'settings');
+  if (!role) return;
   if (!FLAGS.some((f) => f.key === key)) return;
   const current = await getBoolSetting(key, true);
   await setSetting(key, current ? 'off' : 'on');
@@ -719,7 +758,8 @@ export async function toggleFlag(ctx, chatId, telegramId, key, messageId) {
 
 // ── Promo codes (#19) ────────────────────────────────────────────────
 export async function promptAddPromo(ctx, chatId, telegramId) {
-  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const role = await ensureCap(ctx, chatId, telegramId, 'catalog');
+  if (!role) return;
   ctx.sessions.set(chatId, { flow: 'admin', step: 'awaiting_add_promo' });
   await ctx.bot.sendMessage(
     chatId,
@@ -759,7 +799,8 @@ export async function doAddPromo(ctx, chatId, text) {
 
 // ── Inventory ────────────────────────────────────────────────────────
 export async function showInventory(ctx, chatId, telegramId) {
-  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const role = await ensureCap(ctx, chatId, telegramId, 'catalog');
+  if (!role) return;
   const items = await listInventory();
   if (!items.length) {
     await ctx.bot.sendMessage(chatId, 'No inventory items.');
@@ -783,7 +824,8 @@ export async function showInventory(ctx, chatId, telegramId) {
 }
 
 export async function promptSetStock(ctx, chatId, telegramId, sku) {
-  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const role = await ensureCap(ctx, chatId, telegramId, 'catalog');
+  if (!role) return;
   ctx.sessions.set(chatId, { flow: 'admin', step: 'awaiting_stock', data: { sku } });
   await ctx.bot.sendMessage(chatId, `Enter the new stock quantity for \`${sku}\`:`, {
     parse_mode: 'Markdown',
@@ -831,7 +873,8 @@ export async function notifyAdminsForFare(ctx, booking) {
 }
 
 export async function promptFare(ctx, chatId, telegramId, bookingId) {
-  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const role = await ensureCap(ctx, chatId, telegramId, 'manage_experts');
+  if (!role) return;
   ctx.sessions.set(chatId, { flow: 'admin', step: 'awaiting_fare', data: { bookingId } });
   await ctx.bot.sendMessage(chatId, 'Enter the Uber fare in dollars (e.g. 14.50):');
 }
@@ -872,5 +915,219 @@ export async function doSetFare(ctx, chatId, text) {
     );
   } catch {
     /* ignore */
+  }
+}
+
+// ── Block Expert management (Block Manager+) ─────────────────────────
+// Edit any Block Expert: rate, base address, weekly schedule, active flag.
+import { presetWindows } from './expert.js';
+import { listExperts as listExpertsDb } from '../supabase.js';
+
+export async function showExperts(ctx, chatId, telegramId) {
+  const role = await ensureCap(ctx, chatId, telegramId, 'manage_experts');
+  if (!role) return;
+  const experts = await listExpertsDb({ activeOnly: false });
+  if (!experts.length) {
+    await ctx.bot.sendMessage(chatId, 'No Block Experts yet.');
+    return;
+  }
+  const rows = experts.map((e) => [
+    {
+      text: `${e.active ? '🟢' : '🔴'} ${e.full_name || e.username || e.telegram_id}`,
+      callback_data: `adm:exp:${e.id}`,
+    },
+  ]);
+  rows.push([{ text: '⬅️ Back to panel', callback_data: 'adm:menu' }]);
+  await ctx.bot.sendMessage(chatId, '🛠️ *Block Experts* — tap one to manage:', {
+    parse_mode: 'Markdown',
+    reply_markup: { inline_keyboard: rows },
+  });
+}
+
+export async function showExpertCard(ctx, chatId, telegramId, expertId) {
+  const role = await ensureCap(ctx, chatId, telegramId, 'manage_experts');
+  if (!role) return;
+  const e = await getUserById(expertId);
+  if (!e) {
+    await ctx.bot.sendMessage(chatId, 'Block Expert not found.');
+    return;
+  }
+  const windows = await getExpertAvailability(e.id);
+  await ctx.bot.sendMessage(
+    chatId,
+    `👷 *${e.full_name || e.username || e.telegram_id}*${e.username ? ` (@${e.username})` : ''}\n` +
+      `• Status: ${e.active ? '🟢 active' : '🔴 inactive'}\n` +
+      `• 💲 Rate: ${e.rate_cents != null ? usd(e.rate_cents) : 'default'}\n` +
+      `• 📍 Base: ${e.address || '— not set —'}\n` +
+      `• 🗓️ Availability: ${windows.length ? `${windows.length} weekly block(s)` : 'none set (offered every job)'}`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '💲 Set rate', callback_data: `adm:exprate:${e.id}` },
+            { text: '📍 Set base address', callback_data: `adm:expaddr:${e.id}` },
+          ],
+          [{ text: '🗓️ Set schedule', callback_data: `adm:expsched:${e.id}` }],
+          [{ text: e.active ? '🔴 Deactivate' : '🟢 Activate', callback_data: `adm:exptoggle:${e.id}` }],
+          [{ text: '⬅️ All Block Experts', callback_data: 'adm:experts' }],
+        ],
+      },
+    }
+  );
+}
+
+export async function promptExpertRate(ctx, chatId, telegramId, expertId) {
+  const role = await ensureCap(ctx, chatId, telegramId, 'manage_experts');
+  if (!role) return;
+  ctx.sessions.set(chatId, { flow: 'admin', step: 'awaiting_exp_rate', data: { expertId } });
+  await ctx.bot.sendMessage(chatId, 'Enter the new per-session rate in dollars (e.g. 45):');
+}
+
+export async function doExpertRate(ctx, chatId, text) {
+  const s = ctx.sessions.get(chatId);
+  const expertId = s?.data?.expertId;
+  ctx.sessions.delete(chatId);
+  if (!expertId) return;
+  const dollars = Number.parseFloat(String(text).replace(/[^0-9.]/g, ''));
+  if (Number.isNaN(dollars) || dollars <= 0) {
+    await ctx.bot.sendMessage(chatId, 'Please send a valid dollar amount.');
+    return;
+  }
+  const e = await getUserById(expertId);
+  if (!e) return;
+  await setUserRate(e.telegram_id, Math.round(dollars * 100));
+  await ctx.bot.sendMessage(chatId, `✅ Rate set to ${usd(Math.round(dollars * 100))} for ${e.full_name || 'expert'}.`);
+}
+
+export async function promptExpertAddress(ctx, chatId, telegramId, expertId) {
+  const role = await ensureCap(ctx, chatId, telegramId, 'manage_experts');
+  if (!role) return;
+  ctx.sessions.set(chatId, { flow: 'admin', step: 'awaiting_exp_addr', data: { expertId } });
+  await ctx.bot.sendMessage(chatId, 'Send the new base/pickup address:');
+}
+
+export async function doExpertAddress(ctx, chatId, text) {
+  const s = ctx.sessions.get(chatId);
+  const expertId = s?.data?.expertId;
+  ctx.sessions.delete(chatId);
+  if (!expertId) return;
+  const e = await getUserById(expertId);
+  if (!e) return;
+  await setUserAddress(e.telegram_id, String(text).trim());
+  await ctx.bot.sendMessage(chatId, `✅ Base address updated for ${e.full_name || 'expert'}.`);
+}
+
+export async function promptExpertSchedule(ctx, chatId, telegramId, expertId) {
+  const role = await ensureCap(ctx, chatId, telegramId, 'manage_experts');
+  if (!role) return;
+  await ctx.bot.sendMessage(chatId, 'Set their weekly hours (Pacific):', {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '⚡ Weekdays 9–5', callback_data: `adm:expav:${expertId}:weekdays` }],
+        [{ text: '⚡ Every day 9–9', callback_data: `adm:expav:${expertId}:everyday` }],
+        [{ text: '⚡ Weekends 9–9', callback_data: `adm:expav:${expertId}:weekends` }],
+        [{ text: '🧹 Clear (offered every job)', callback_data: `adm:expav:${expertId}:clear` }],
+        [{ text: '⬅️ Back', callback_data: `adm:exp:${expertId}` }],
+      ],
+    },
+  });
+}
+
+export async function setExpertSchedule(ctx, chatId, telegramId, expertId, preset) {
+  const role = await ensureCap(ctx, chatId, telegramId, 'manage_experts');
+  if (!role) return;
+  const windows = presetWindows(preset);
+  if (windows === null) return;
+  await setExpertAvailability(expertId, windows);
+  const e = await getUserById(expertId);
+  await ctx.bot.sendMessage(chatId, `✅ Schedule updated (${preset}) for ${e?.full_name || 'expert'}.`);
+  try {
+    if (e) await ctx.bot.sendMessage(e.telegram_id, '🗓️ A manager updated your weekly availability — check /builder → Availability.');
+  } catch {
+    /* expert hasn't opened the bot */
+  }
+}
+
+export async function toggleExpertActive(ctx, chatId, telegramId, expertId) {
+  const role = await ensureCap(ctx, chatId, telegramId, 'manage_experts');
+  if (!role) return;
+  const e = await getUserById(expertId);
+  if (!e) return;
+  const updated = await setActive(e.telegram_id, !e.active);
+  await ctx.bot.sendMessage(chatId, `✅ ${updated.full_name || 'Expert'} is now ${updated.active ? '🟢 active' : '🔴 inactive'}.`);
+  await showExpertCard(ctx, chatId, telegramId, expertId);
+}
+
+// ── Role management (Administrator+; Administrators are owner-only) ──
+export async function showRoles(ctx, chatId, telegramId) {
+  const role = await ensureCap(ctx, chatId, telegramId, 'manage_roles');
+  if (!role) return;
+  const users = await listUsers();
+  const staff = users.filter((u) => isStaff(effectiveRole(u)) || u.role === 'expert');
+  const lines = staff.length
+    ? staff.map((u) => `• ${u.full_name || u.username || u.telegram_id} — *${ROLE_LABELS[u.role] || u.role}*${u.active ? '' : ' (inactive)'}`)
+    : ['_No staff or Block Experts yet._'];
+  ctx.sessions.set(chatId, { flow: 'admin', step: 'awaiting_role_user' });
+  await ctx.bot.sendMessage(
+    chatId,
+    `🎖️ *Roles*\n\n${lines.join('\n')}\n\nSend a *@handle* or *Telegram ID* to change someone’s role (or /start to cancel):`,
+    { parse_mode: 'Markdown' }
+  );
+}
+
+export async function doPickRoleUser(ctx, chatId, telegramId, text) {
+  ctx.sessions.delete(chatId);
+  const actorRole = await resolveRole(telegramId);
+  if (!can(actorRole, 'manage_roles')) return;
+  const key = String(text).trim().replace(/^@/, '').toLowerCase();
+  const users = await listUsers();
+  const target = users.find(
+    (u) => String(u.telegram_id) === key || (u.username || '').toLowerCase() === key
+  );
+  if (!target) {
+    await ctx.bot.sendMessage(chatId, 'No user found with that handle/ID. They must have opened the bot once.');
+    return;
+  }
+  if (!canChangeRoleOf(actorRole, effectiveRole(target))) {
+    await ctx.bot.sendMessage(chatId, '🔒 Only the Owner can change an Administrator’s role.');
+    return;
+  }
+  const options = assignableRoles(actorRole).map((r) => [
+    { text: ROLE_LABELS[r], callback_data: `adm:setrole:${target.telegram_id}:${r}` },
+  ]);
+  await ctx.bot.sendMessage(
+    chatId,
+    `Set role for *${target.full_name || target.username || target.telegram_id}* (currently ${ROLE_LABELS[target.role] || target.role}):`,
+    { parse_mode: 'Markdown', reply_markup: { inline_keyboard: options } }
+  );
+}
+
+export async function doSetRole(ctx, chatId, telegramId, targetTelegramId, newRole) {
+  const actorRole = await resolveRole(telegramId);
+  if (!can(actorRole, 'manage_roles')) return;
+  if (!assignableRoles(actorRole).includes(newRole)) {
+    await ctx.bot.sendMessage(chatId, '🔒 You can’t assign that role.');
+    return;
+  }
+  const target = await getUserByTelegramId(Number(targetTelegramId));
+  if (!target) return;
+  if (!canChangeRoleOf(actorRole, effectiveRole(target))) {
+    await ctx.bot.sendMessage(chatId, '🔒 Only the Owner can change an Administrator’s role.');
+    return;
+  }
+  const updated = await setRole(target.telegram_id, newRole);
+  await ctx.bot.sendMessage(chatId, `✅ ${updated.full_name || updated.username || updated.telegram_id} is now *${ROLE_LABELS[newRole]}*.`, { parse_mode: 'Markdown' });
+  const notes = {
+    administrator: '🎖️ You’ve been made an *Administrator* — open /owner for the staff panel.',
+    block_manager: '🎖️ You’ve been made a *Block Manager* — open /owner to manage Block Experts.',
+    store_manager: '🎖️ You’ve been made a *Store Manager* — open /owner to manage store orders.',
+    expert: '🎖️ You’re now a *Block Expert* — tap /builder to set up your portal.',
+    customer: 'Your staff access has been removed.',
+  };
+  try {
+    await ctx.bot.sendMessage(target.telegram_id, notes[newRole] || 'Your role was updated.', { parse_mode: 'Markdown' });
+  } catch {
+    /* target hasn't opened the bot */
   }
 }
