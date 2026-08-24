@@ -3,6 +3,7 @@ import { usd, fmtHourRange, shortRef, orderItemsSummary } from '../lib/format.js
 import { orderTotalCents } from '../lib/money.js';
 import {
   getUserByTelegramId,
+  getBooking,
   listOrdersByTelegramId,
   listBookingsByCustomer,
   getBalance,
@@ -113,6 +114,11 @@ export async function cancelMyOrder(ctx, chatId, telegramId, orderId) {
 }
 
 export async function cancelMyBooking(ctx, chatId, telegramId, bookingId) {
+  const booking = await getBooking(bookingId);
+  if (!booking || booking.customer_telegram_id !== telegramId) {
+    await ctx.bot.sendMessage(chatId, 'Booking not found.');
+    return;
+  }
   const cancelled = await cancelBookingById(bookingId);
   await ctx.bot.sendMessage(
     chatId,
@@ -122,15 +128,20 @@ export async function cancelMyBooking(ctx, chatId, telegramId, bookingId) {
   );
 }
 
-export async function showOrderPayment(ctx, chatId, orderId) {
+export async function showOrderPayment(ctx, chatId, telegramId, orderId) {
   const order = await getOrder(orderId);
-  if (!order || order.status !== 'pending') {
+  if (!order || order.telegram_id !== telegramId || order.status !== 'pending') {
     await ctx.bot.sendMessage(chatId, 'That order is no longer awaiting payment.');
     return;
   }
   await presentWaiver(ctx, chatId, 'o', orderId);
 }
 
-export async function showBookingPayment(ctx, chatId, bookingId) {
+export async function showBookingPayment(ctx, chatId, telegramId, bookingId) {
+  const booking = await getBooking(bookingId);
+  if (!booking || booking.customer_telegram_id !== telegramId || booking.payment_status === 'paid') {
+    await ctx.bot.sendMessage(chatId, 'That booking is no longer awaiting payment.');
+    return;
+  }
   await presentWaiver(ctx, chatId, 'b', bookingId);
 }

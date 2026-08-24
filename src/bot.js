@@ -335,9 +335,9 @@ export function createBot() {
       // Account self-service
       else if (data === 'acct:orders') await account.showMyOrders(ctx, chatId, telegramId);
       else if (data.startsWith('acct:payo:'))
-        await account.showOrderPayment(ctx, chatId, sliceAfter(data, 'acct:payo:'));
+        await account.showOrderPayment(ctx, chatId, telegramId, sliceAfter(data, 'acct:payo:'));
       else if (data.startsWith('acct:payb:'))
-        await account.showBookingPayment(ctx, chatId, sliceAfter(data, 'acct:payb:'));
+        await account.showBookingPayment(ctx, chatId, telegramId, sliceAfter(data, 'acct:payb:'));
       else if (data.startsWith('acct:cano:'))
         await account.cancelMyOrder(ctx, chatId, telegramId, sliceAfter(data, 'acct:cano:'));
       else if (data.startsWith('acct:canb:'))
