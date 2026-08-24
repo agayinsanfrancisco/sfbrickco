@@ -16,9 +16,26 @@ import {
   listOpenBookings,
   listAwaitingPaymentBookings,
   listUsers,
+  listExperts,
   getBooking,
   getOrder,
+  getUserById,
+  acceptOpenBooking,
+  setBookingSurcharge,
+  setRole,
+  setActive,
+  builderPayoutData,
+  recordPayout,
+  listInventory,
+  setStock,
+  setProductPrice,
+  supabase,
 } from './supabase.js';
+import { confirmOrder, confirmBooking } from './flows/payments.js';
+import { manualSurchargeCents } from './uber.js';
+import { config as cfg } from './config.js';
+import { refreshChatCommands } from './lib/commands.js';
+import { isStaff, ROLE_LABELS } from './lib/roles.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UI_PATH = path.join(__dirname, 'admin-ui.html');
@@ -208,6 +225,146 @@ export function createWebAdmin(ctx) {
     if (!row) return res.status(409).json({ error: 'could not mark refunded' });
     await notify(row.customer_telegram_id, '↩️ Your booking has been refunded.');
     res.json({ ok: true });
+  });
+
+  // ── Action queue: everything needing a human, in one payload ────────
+  api.get('/queue', async (_req, res) => {
+    const [apps, dispatch, open, awaitingPay, payoutData, fares] = await Promise.all([
+      listPendingApplications(),
+      listPaidUndispatchedOrders(),
+      listOpenBookings(),
+      listAwaitingPaymentBookings(),
+      builderPayoutData(),
+      supabase.from('bookings').select('*').eq('payment_status', 'unpaid').is('total_cents', null).then((r) => r.data || []),
+    ]);
+    // payouts owed per expert (net of platform fee, minus already paid)
+    const fee = cfg.pricing.platformFeePct;
+    const byExpert = new Map();
+    for (const b of payoutData.earned) {
+      const cur = byExpert.get(b.expert_id) || { gross: 0, paidOut: 0, jobs: 0 };
+      cur.gross += b.service_fee_cents || 0;
+      cur.jobs += 1;
+      byExpert.set(b.expert_id, cur);
+    }
+    for (const p of payoutData.paid) {
+      const cur = byExpert.get(p.expert_id) || { gross: 0, paidOut: 0, jobs: 0 };
+      cur.paidOut += p.amount_cents || 0;
+      byExpert.set(p.expert_id, cur);
+    }
+    const payouts = [];
+    for (const [expertId, v] of byExpert) {
+      const net = Math.round((v.gross * (100 - fee)) / 100);
+      const owed = Math.max(0, net - v.paidOut);
+      if (owed > 0) {
+        const u = await getUserById(expertId);
+        payouts.push({ expertId, name: u?.full_name || u?.username || expertId.slice(0, 8), jobs: v.jobs, owedCents: owed });
+      }
+    }
+    res.json({ applications: apps, dispatch, openBookings: open, awaitingPayment: awaitingPay, faresNeeded: fares, payouts });
+  });
+
+  api.get('/experts', async (_req, res) => {
+    res.json(await listExperts({ activeOnly: true }));
+  });
+
+  // Log an off-platform payment — full bot-side notification fidelity.
+  api.post('/orders/:id/paid', async (req, res) => {
+    const order = await getOrder(req.params.id);
+    if (!order || order.status !== 'pending') return res.status(409).json({ error: 'order is not awaiting payment' });
+    const ok = await confirmOrder({ bot: ctx?.bot }, order, { auto: false });
+    res.json({ ok });
+  });
+
+  api.post('/bookings/:id/paid', async (req, res) => {
+    const booking = await getBooking(req.params.id);
+    if (!booking || booking.payment_status === 'paid') return res.status(409).json({ error: 'not awaiting payment' });
+    const ok = await confirmBooking({ bot: ctx?.bot }, booking, { auto: false });
+    res.json({ ok });
+  });
+
+  // Confirm a manual travel fare; customer gets the pay button.
+  api.post('/bookings/:id/fare', async (req, res) => {
+    const cents = manualSurchargeCents(String(req.body?.dollars ?? ''));
+    if (cents === null) return res.status(400).json({ error: 'invalid amount' });
+    const booking = await getBooking(req.params.id);
+    if (!booking) return res.status(404).json({ error: 'not found' });
+    const total = booking.service_fee_cents + cents;
+    const updated = await setBookingSurcharge(booking.id, { surchargeCents: cents, source: 'manual', totalCents: total });
+    if (!updated) return res.status(409).json({ error: 'could not set fare' });
+    try {
+      await ctx?.bot?.sendMessage(
+        updated.customer_telegram_id,
+        `✅ Travel fare confirmed: $${(cents / 100).toFixed(2)}. Total $${(total / 100).toFixed(2)}.`,
+        { reply_markup: { inline_keyboard: [[{ text: `Pay $${(total / 100).toFixed(2)}`, callback_data: `book:pay:${booking.id}` }]] } }
+      );
+    } catch { /* ignore */ }
+    res.json({ ok: true });
+  });
+
+  // Assign a Block Expert to an open booking.
+  api.post('/bookings/:id/assign', async (req, res) => {
+    const expertId = String(req.body?.expertId || '');
+    const booking = await getBooking(req.params.id);
+    if (!booking || booking.status !== 'awaiting_acceptance') return res.status(409).json({ error: 'booking is not open' });
+    const accepted = await acceptOpenBooking(booking.id, expertId);
+    if (!accepted) return res.status(409).json({ error: 'no longer open' });
+    const expert = await getUserById(expertId);
+    try {
+      if (expert) await ctx?.bot?.sendMessage(expert.telegram_id, `📋 You’ve been assigned a job — check /builder → My jobs.`);
+      await ctx?.bot?.sendMessage(accepted.customer_telegram_id, `🎉 A Block Expert was assigned! Total $${((accepted.total_cents || 0) / 100).toFixed(2)}.`, {
+        reply_markup: { inline_keyboard: [[{ text: 'Pay now', callback_data: `book:pay:${booking.id}` }]] },
+      });
+    } catch { /* ignore */ }
+    res.json({ ok: true });
+  });
+
+  // Record a payout transfer (money moves outside; this is the ledger).
+  api.post('/payouts/:expertId', async (req, res) => {
+    const amount = Number.parseInt(req.body?.amountCents, 10);
+    if (!Number.isInteger(amount) || amount <= 0) return res.status(400).json({ error: 'invalid amount' });
+    await recordPayout(req.params.expertId, amount, 'dashboard');
+    const u = await getUserById(req.params.expertId);
+    try {
+      if (u) await ctx?.bot?.sendMessage(u.telegram_id, `💸 You’ve been paid $${(amount / 100).toFixed(2)} — thanks for building with us!`);
+    } catch { /* ignore */ }
+    res.json({ ok: true });
+  });
+
+  // User management: role + active (dashboard token = owner-level).
+  api.post('/users/:telegramId/role', async (req, res) => {
+    const role = String(req.body?.role || '');
+    if (!['customer', 'expert', 'block_manager', 'store_manager', 'support', 'administrator'].includes(role))
+      return res.status(400).json({ error: 'invalid role' });
+    const updated = await setRole(Number(req.params.telegramId), role);
+    if (!updated) return res.status(404).json({ error: 'user not found' });
+    refreshChatCommands(ctx?.bot, updated.telegram_id, { isExpert: role === 'expert', isStaffMember: isStaff(role) });
+    try {
+      await ctx?.bot?.sendMessage(updated.telegram_id, `🎖️ Your role is now ${ROLE_LABELS[role]}.`);
+    } catch { /* ignore */ }
+    res.json({ ok: true });
+  });
+
+  api.post('/users/:telegramId/active', async (req, res) => {
+    const updated = await setActive(Number(req.params.telegramId), Boolean(req.body?.active));
+    if (!updated) return res.status(404).json({ error: 'user not found' });
+    res.json({ ok: true, active: updated.active });
+  });
+
+  // Inventory management.
+  api.get('/inventory', async (_req, res) => {
+    res.json(await listInventory());
+  });
+  api.post('/inventory/:sku/stock', async (req, res) => {
+    const qty = Number.parseInt(req.body?.qty, 10);
+    if (!Number.isInteger(qty) || qty < 0) return res.status(400).json({ error: 'invalid qty' });
+    const updated = await setStock(req.params.sku, qty);
+    res.json(updated ? { ok: true, stock: updated.stock_qty } : { ok: false });
+  });
+  api.post('/inventory/:sku/price', async (req, res) => {
+    const dollars = Number.parseFloat(req.body?.dollars);
+    if (Number.isNaN(dollars) || dollars < 0) return res.status(400).json({ error: 'invalid price' });
+    const updated = await setProductPrice(req.params.sku, { unitPriceCents: Math.round(dollars * 100) });
+    res.json(updated ? { ok: true } : { ok: false });
   });
 
   router.use('/admin/api', api);
