@@ -8,6 +8,7 @@ import {
 import { geocode } from '../uber.js';
 import { BUILDER_AGREEMENT } from './expert.js';
 import { usd } from '../lib/format.js';
+import { notifyStaff } from '../lib/notify.js';
 
 // Multi-step application to become a Block Expert. Anyone can apply, but every
 // application is gated: it sits in `admin_applications` as `pending` until an
@@ -229,27 +230,19 @@ export async function agreeAndSubmit(ctx, chatId, telegramId) {
     '✅ *Application submitted!*\nWe’ll review it and message you — once you’re approved you’ll be live and bookable immediately.',
     { parse_mode: 'Markdown' }
   );
-  for (const adminId of config.adminIds) {
-    try {
-      await ctx.bot.sendMessage(
-        adminId,
-        `🧰 *New Block Expert application*\n` +
-          `👤 ${d.name}${d.username ? ` (@${d.username})` : ''}\n` +
-          `🕑 ${d.hours}\n💲 ${d.rate}\n📞 ${d.phone || '—'}\n📍 ${d.baseAddress}\n🤝 Agreement accepted`,
-        {
-          parse_mode: 'Markdown',
-          reply_markup: {
-            inline_keyboard: [
-              [
-                { text: '✅ Approve', callback_data: `adm:appok:${app.id}` },
-                { text: '❌ Reject', callback_data: `adm:appno:${app.id}` },
-              ],
-            ],
-          },
-        }
-      );
-    } catch {
-      /* owner hasn't opened the bot */
-    }
-  }
+  await notifyStaff(ctx, 'approve_applications',
+    `🧰 *New Block Expert application*\n` +
+      `👤 ${d.name}${d.username ? ` (@${d.username})` : ''}\n` +
+      `🕑 ${d.hours}\n💲 ${d.rate}\n📞 ${d.phone || '—'}\n📍 ${d.baseAddress}\n🤝 Agreement accepted`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [
+            { text: '✅ Approve', callback_data: `adm:appok:${app.id}` },
+            { text: '❌ Reject', callback_data: `adm:appno:${app.id}` },
+          ],
+        ],
+      },
+    });
 }

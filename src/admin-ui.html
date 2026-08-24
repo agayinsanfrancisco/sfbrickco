@@ -91,7 +91,7 @@
 <div id="msg"></div>
 
 <script>
-const TABS = ['Queue', 'Orders', 'Bookings', 'Users', 'Inventory'];
+const TABS = ['Queue', 'Orders', 'Bookings', 'Users', 'Inventory', 'Audit'];
 let cur = 'Queue';
 let counts = {};
 
@@ -224,13 +224,20 @@ async function render() {
               <button class="act" onclick="setRole(${u.telegram_id})">Set</button></td>
           <td>${u.active ? '🟢' : '🔴'}</td>
           <td><button class="act" onclick="act('/users/${u.telegram_id}/active?on=${u.active ? 0 : 1}','${u.active ? 'Deactivated' : 'Activated'}')">${u.active ? 'Deactivate' : 'Activate'}</button></td></tr>`));
+    } else if (cur === 'Audit') {
+      const rows = await api('/audit');
+      v.innerHTML = table(['When', 'Actor', 'Role', 'Action', 'Target', 'Detail'],
+        rows.map((r) => `<tr><td>${when(r.created_at)}</td><td>${r.actor_telegram_id || '—'}</td>
+          <td>${esc(r.actor_role || '—')}</td><td>${esc(r.action)}</td>
+          <td class="wrap">${esc(r.target || '—')}</td><td class="wrap">${esc(r.detail || '—')}</td></tr>`));
     } else if (cur === 'Inventory') {
       const items = await api('/inventory');
-      v.innerHTML = table(['Product', 'SKU', 'Stock', 'Price $', 'Min / order', ''],
+      v.innerHTML = table(['Product', 'SKU', 'Stock', 'Price $', 'Min/order', 'Reorder at', ''],
         items.map((it) => `<tr><td>${esc(it.name)}</td><td>${esc(it.sku)}</td>
           <td><input id="stk-${it.sku}" size="4" value="${it.stock_qty}"></td>
           <td><input id="prc-${it.sku}" size="6" value="${((it.unit_price_cents||0)/100).toFixed(2)}"></td>
           <td><input id="min-${it.sku}" size="4" value="${it.min_qty ?? 1}"></td>
+          <td><input id="flr-${it.sku}" size="4" value="${it.reorder_floor ?? 0}"></td>
           <td><button class="act primary" onclick="saveItem('${it.sku}')">Save</button></td></tr>`));
     }
   } catch (err) {
@@ -267,10 +274,12 @@ async function saveItem(sku) {
   const qty = document.getElementById('stk-' + sku).value;
   const dollars = document.getElementById('prc-' + sku).value;
   const min = document.getElementById('min-' + sku).value;
+  const floor = document.getElementById('flr-' + sku).value;
   try {
     await api(`/inventory/${sku}/stock`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ qty: Number(qty) }) });
     await api(`/inventory/${sku}/price`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dollars: Number(dollars) }) });
     await api(`/inventory/${sku}/min`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ min: Number(min) }) });
+    await api(`/inventory/${sku}/floor`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ floor: Number(floor) }) });
     toast('Saved'); refresh();
   } catch (err) { toast('⚠ ' + err.message); }
 }

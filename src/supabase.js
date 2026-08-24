@@ -975,6 +975,26 @@ export async function getInventory(sku) {
   return data;
 }
 
+export async function logStaffActionRow({ actorTelegramId, actorRole, action, target, detail }) {
+  const { error } = await supabase.from('staff_actions').insert({
+    actor_telegram_id: actorTelegramId,
+    actor_role: actorRole,
+    action,
+    target,
+    detail,
+  });
+  if (error) throw error;
+}
+
+export async function listStaffActions(limit = 100) {
+  const { data } = await supabase
+    .from('staff_actions')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+  return data || [];
+}
+
 export async function listInventory() {
   const { data } = await supabase.from('inventory').select('*').order('sku');
   return data || [];
@@ -1136,7 +1156,9 @@ export async function decrementStock(sku, qty) {
   const { data, error } = await supabase.rpc('decrement_stock', { p_sku: sku, p_qty: qty });
   if (error) throw error;
   if (data === null || data === undefined) return null;
-  return { sku, stock_qty: data };
+  // Fetch name + reorder_floor so callers can render sold-out / low-stock alerts.
+  const { data: row } = await supabase.from('inventory').select('name, reorder_floor').eq('sku', sku).maybeSingle();
+  return { sku, stock_qty: data, name: row?.name || sku, reorder_floor: row?.reorder_floor ?? 0 };
 }
 
 // ── Atomic stock reservation (#39) ───────────────────────────────────

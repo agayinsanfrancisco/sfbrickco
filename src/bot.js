@@ -164,7 +164,13 @@ export function createBot() {
       return;
     }
     if (!msg.text || msg.text.startsWith('/')) return; // commands handled above
-    if (!s) return;
+    // No active flow (never started one, or it expired via the idle sweep):
+    // don't go silent — point them back to the menu.
+    if (!s) {
+      await sendMainMenu(chatId, telegramId);
+      return;
+    }
+    let handled = true;
 
     try {
       if (s.flow === 'shop' && s.step === 'awaiting_qty') {
@@ -227,6 +233,17 @@ export function createBot() {
         await admin.doExpertAddress(ctx, chatId, msg.text);
       } else if (s.flow === 'admin' && s.step === 'awaiting_role_user') {
         await admin.doPickRoleUser(ctx, chatId, telegramId, msg.text);
+      } else {
+        handled = false;
+      }
+      // Session exists but the text matched no active step (usually a stale
+      // flow after a restart or an idle-expired step) — acknowledge instead of
+      // going silent.
+      if (!handled) {
+        await bot.sendMessage(
+          chatId,
+          '🤔 I wasn’t expecting a message just then — your last step may have expired. Tap /start to go to the menu, or /shop, /book, or /wallet to pick up again.'
+        );
       }
     } catch (err) {
       await reportError(ctx, 'message handler', err);

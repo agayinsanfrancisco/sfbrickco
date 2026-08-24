@@ -39,6 +39,7 @@ import { manualSurchargeCents, estimateBetween } from '../uber.js';
 import { effectiveRole, can, canChangeRoleOf, assignableRoles, displayName, displayPhone, ROLE_LABELS, isStaff } from '../lib/roles.js';
 import { parseHoursToWindows, parseRateCents } from '../lib/hours.js';
 import { refreshChatCommands } from '../lib/commands.js';
+import { notifyStaff, logStaffAction } from '../lib/notify.js';
 import { adminMenu, adminCategory } from '../lib/keyboards.js';
 import { usd, fmtHourRange, shortRef, orderItemsSummary } from '../lib/format.js';
 import { getIntSetting, getBoolSetting, invalidateSettings } from '../lib/settings.js';
@@ -373,6 +374,7 @@ export async function doRefund(ctx, chatId, text) {
     return;
   }
   await ctx.bot.sendMessage(chatId, `↩️ Marked refunded${txid ? ` (tx ${txid})` : ''}.`);
+  await logStaffAction(null, 'staff', 'refund.mark', `${kind}:${ref}`, txid || null);
   const customerId = kind === 'o' ? row.telegram_id : row.customer_telegram_id;
   try {
     await ctx.bot.sendMessage(customerId, `↩️ Your ${kind === 'o' ? 'order' : 'booking'} ${shortRef(ref)} has been refunded.`);
@@ -431,6 +433,7 @@ export async function doPayout(ctx, chatId, telegramId, expertId, amountCents) {
   if (!Number.isInteger(amount) || amount <= 0) return;
   await recordPayout(expertId, amount, 'owner-marked');
   const u = await getUserById(expertId);
+  await logStaffAction(telegramId, await resolveRole(telegramId), 'payout.record', u?.full_name || expertId, usd(amount));
   await ctx.bot.sendMessage(chatId, `✅ Recorded ${usd(amount)} payout to ${u?.full_name || 'builder'}.`);
   try {
     if (u) await ctx.bot.sendMessage(u.telegram_id, `💸 You’ve been paid *${usd(amount)}* — check your wallet/account. Thanks for building with us!`, { parse_mode: 'Markdown' });
@@ -702,6 +705,7 @@ export async function approveApplication(ctx, chatId, telegramId, appId) {
   const role = await ensureCap(ctx, chatId, telegramId, 'approve_applications');
   if (!role) return;
   const app = await setApplicationStatus(appId, 'approved');
+  if (app) await logStaffAction(telegramId, role, 'application.approve', app.name, app.base_address);
   if (!app) {
     await ctx.bot.sendMessage(chatId, 'That application was already handled.');
     return;
@@ -747,6 +751,7 @@ export async function rejectApplication(ctx, chatId, telegramId, appId) {
   const role = await ensureCap(ctx, chatId, telegramId, 'approve_applications');
   if (!role) return;
   const app = await setApplicationStatus(appId, 'rejected');
+  if (app) await logStaffAction(telegramId, role, 'application.reject', app.name, null);
   if (!app) {
     await ctx.bot.sendMessage(chatId, 'That application was already handled.');
     return;
@@ -899,24 +904,12 @@ export async function doSetStock(ctx, chatId, text) {
 // ── Manual surcharge (option B) ──────────────────────────────────────
 // Notify every admin that a booking needs a fare confirmed.
 export async function notifyAdminsForFare(ctx, booking) {
-  for (const adminId of config.adminIds) {
-    try {
-      await ctx.bot.sendMessage(
-        adminId,
-        `💸 Confirm Uber fare for booking at:\n📍 ${booking.customer_address}\n🕑 ${fmtHourRange(
-          booking.slot_start,
-          booking.slot_end
-        )}`,
-        {
-          reply_markup: {
-            inline_keyboard: [[{ text: 'Enter fare $', callback_data: `adm:fare:${booking.id}` }]],
-          },
-        }
-      );
-    } catch {
-      /* admin hasn't opened the bot; ignore */
-    }
-  }
+  await notifyStaff(
+    ctx,
+    'manage_experts',
+    `💸 Confirm Uber fare for booking at:\n📍 ${booking.customer_address}\n🕑 ${fmtHourRange(booking.slot_start, booking.slot_end)}`,
+    { reply_markup: { inline_keyboard: [[{ text: 'Enter fare $', callback_data: `adm:fare:${booking.id}` }]] } }
+  );
 }
 
 export async function promptFare(ctx, chatId, telegramId, bookingId) {
@@ -1164,6 +1157,7 @@ export async function doSetRole(ctx, chatId, telegramId, targetTelegramId, newRo
     return;
   }
   const updated = await setRole(target.telegram_id, newRole);
+  await logStaffAction(telegramId, actorRole, 'role.set', updated.full_name || String(updated.telegram_id), ROLE_LABELS[newRole]);
   await ctx.bot.sendMessage(chatId, `✅ ${updated.full_name || updated.username || updated.telegram_id} is now *${ROLE_LABELS[newRole]}*.`, { parse_mode: 'Markdown' });
   await refreshChatCommands(ctx.bot, target.telegram_id, {
     isExpert: newRole === 'expert',

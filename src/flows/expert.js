@@ -27,6 +27,7 @@ import { promptReview } from './review.js';
 import { expertJobKeyboard } from '../lib/keyboards.js';
 import { usd, fmtHourRange, shortRef } from '../lib/format.js';
 import { isCovered, BLOCKS, blockActive, upcomingDays, hourlySlots } from '../lib/slots.js';
+import { notifyStaff } from '../lib/notify.js';
 
 const DOW_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
@@ -543,17 +544,9 @@ export async function cancelJob(ctx, chatId, telegramId, bookingId) {
     } catch {
       /* ignore */
     }
-    for (const adminId of config.adminIds) {
-      try {
-        await ctx.bot.sendMessage(
-          adminId,
-          `⚠️ Booking ${shortRef(bookingId)} (${when}) — Block Expert cancelled, no replacement available. ` +
-            `${booking.payment_status === 'paid' ? 'PAID — needs refund/reschedule.' : 'unpaid.'} Customer routed to support.`
-        );
-      } catch {
-        /* ignore */
-      }
-    }
+    await notifyStaff(ctx, 'manage_experts',
+      `⚠️ Booking ${shortRef(bookingId)} (${when}) — Block Expert cancelled, no replacement available. ` +
+        `${booking.payment_status === 'paid' ? 'PAID — needs refund/reschedule.' : 'unpaid.'} Customer routed to support.`);
     await ctx.bot.sendMessage(chatId, '✅ Cancelled. No replacement was available — the customer was directed to support.');
   }
 }
