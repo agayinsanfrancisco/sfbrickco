@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
 import { config } from './config.js';
+import { applyApprovalSideEffects } from './flows/admin.js';
 import {
   listPendingApplications,
   setApplicationStatus,
@@ -162,6 +163,7 @@ export function createWebAdmin(ctx) {
     const app = await setApplicationStatus(req.params.id, 'approved');
     if (!app) return res.status(409).json({ error: 'already handled' });
     const user = await promoteToExpert(app.telegram_id, app.base_address);
+    if (ctx?.bot) await applyApprovalSideEffects(ctx.bot, app, user);
     await notify(
       app.telegram_id,
       '🎉 *You’re approved as a Block Expert!*\n\n' +

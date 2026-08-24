@@ -3,6 +3,7 @@ import { config, isAdminId } from './config.js';
 import { upsertUser, getUserByTelegramId, deleteUserData } from './supabase.js';
 import { mainMenu } from './lib/keyboards.js';
 import { effectiveRole, isStaff } from './lib/roles.js';
+import { refreshChatCommands } from './lib/commands.js';
 import { log, reportError } from './lib/log.js';
 import { SessionStore } from './lib/sessions.js';
 
@@ -53,6 +54,11 @@ export function createBot() {
 
   async function sendMainMenu(chatId, telegramId) {
     const user = await getUserByTelegramId(telegramId);
+    // Keep the "/" menu in sync with what this person can actually do.
+    refreshChatCommands(bot, chatId, {
+      isExpert: user?.role === 'expert' || user?.role === 'admin',
+      isStaffMember: isAdminId(telegramId) || isStaff(effectiveRole(user)),
+    });
     await bot.sendMessage(
       chatId,
       '🧱 *SF Brick Company* 🧱\n\n' +
@@ -314,6 +320,7 @@ export function createBot() {
       }
       // Apply to be a Block Expert
       else if (data === 'apply:start') await apply.startApply(ctx, chatId, telegramId);
+      else if (data.startsWith('apply:hrs:')) await apply.chooseHours(ctx, chatId, sliceAfter(data, 'apply:hrs:'));
       // Account self-service
       else if (data === 'acct:orders') await account.showMyOrders(ctx, chatId, telegramId);
       else if (data.startsWith('acct:payo:'))

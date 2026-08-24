@@ -37,6 +37,8 @@ import {
 } from '../supabase.js';
 import { manualSurchargeCents, estimateBetween } from '../uber.js';
 import { effectiveRole, can, canChangeRoleOf, assignableRoles, displayName, displayPhone, ROLE_LABELS, isStaff } from '../lib/roles.js';
+import { parseHoursToWindows, parseRateCents } from '../lib/hours.js';
+import { refreshChatCommands } from '../lib/commands.js';
 import { adminMenu, adminCategory } from '../lib/keyboards.js';
 import { usd, fmtHourRange, shortRef, orderItemsSummary } from '../lib/format.js';
 import { getIntSetting, getBoolSetting, invalidateSettings } from '../lib/settings.js';
@@ -672,6 +674,30 @@ export async function showApplications(ctx, chatId, telegramId) {
   }
 }
 
+// Carry the application over onto the approved expert: rate, weekly hours
+// (only if they have none yet), and their per-chat /builder command. Returns
+// a short summary of what was set.
+export async function applyApprovalSideEffects(bot, app, user) {
+  const bits = [];
+  const rateCents = parseRateCents(app.rate);
+  if (user && rateCents) {
+    await setUserRate(app.telegram_id, rateCents);
+    bits.push(`rate ${usd(rateCents)}`);
+  }
+  if (user) {
+    const existing = await getExpertAvailability(user.id);
+    if (!existing.length) {
+      const windows = parseHoursToWindows(app.hours);
+      if (windows.length) {
+        await setExpertAvailability(user.id, windows);
+        bits.push(`${windows.length} weekly hour block(s) from “${app.hours}”`);
+      }
+    }
+  }
+  await refreshChatCommands(bot, app.telegram_id, { isExpert: true });
+  return bits;
+}
+
 export async function approveApplication(ctx, chatId, telegramId, appId) {
   const role = await ensureCap(ctx, chatId, telegramId, 'approve_applications');
   if (!role) return;
@@ -681,10 +707,11 @@ export async function approveApplication(ctx, chatId, telegramId, appId) {
     return;
   }
   const user = await promoteToExpert(app.telegram_id, app.base_address);
+  const bits = await applyApprovalSideEffects(ctx.bot, app, user);
   await ctx.bot.sendMessage(
     chatId,
     user
-      ? `✅ Approved *${app.name}* as a Block Expert (base ${app.base_address}).`
+      ? `✅ Approved *${app.name}* as a Block Expert (base ${app.base_address}${bits.length ? `; set ${bits.join(', ')}` : ''}).`
       : `✅ Approved — but ${app.name} must open the bot (/start) once before activation takes effect.`,
     { parse_mode: 'Markdown' }
   );
@@ -692,10 +719,12 @@ export async function approveApplication(ctx, chatId, telegramId, appId) {
     await ctx.bot.sendMessage(
       app.telegram_id,
       '🎉 *You’re approved as a Block Expert!*\n\n' +
-        'Two quick steps to start getting booked:\n' +
-        '① Tap /builder → *🗓️ Availability* and turn on the hours you want to work.\n' +
-        '② Confirm your *📍 base address* (used to price travel) and *💲 your rate*.\n\n' +
-        'Customers can then book you directly during your hours. You keep your contact private until a job is paid — coordinate through the bot.',
+        `We’ve set you up from your application:\n` +
+        `• 💲 Rate: ${parseRateCents(app.rate) ? usd(parseRateCents(app.rate)) : 'not set — tap /builder → Set my rate'}\n` +
+        `• 🗓️ Hours: pre-filled from “${app.hours}” — fine-tune anytime\n` +
+        `• 📍 Base: ${app.base_address}\n\n` +
+        'One step left: tap /builder and accept the *Block Expert Agreement* — you can’t receive jobs until you do. ' +
+        'Your /builder command is now in the ☰ menu. You keep your contact private until a job is paid — coordinate through the bot.',
       { parse_mode: 'Markdown' }
     );
   } catch {
@@ -1125,6 +1154,10 @@ export async function doSetRole(ctx, chatId, telegramId, targetTelegramId, newRo
   }
   const updated = await setRole(target.telegram_id, newRole);
   await ctx.bot.sendMessage(chatId, `✅ ${updated.full_name || updated.username || updated.telegram_id} is now *${ROLE_LABELS[newRole]}*.`, { parse_mode: 'Markdown' });
+  await refreshChatCommands(ctx.bot, target.telegram_id, {
+    isExpert: newRole === 'expert',
+    isStaffMember: isStaff(newRole),
+  });
   const notes = {
     administrator: '🎖️ You’ve been made an *Administrator* — open /owner for the staff panel.',
     block_manager: '🎖️ You’ve been made a *Block Manager* — open /owner to manage Block Experts.',
