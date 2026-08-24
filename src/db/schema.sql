@@ -10,7 +10,7 @@ create table if not exists users (
   username      text,
   full_name     text,
   role          text not null default 'customer'
-                  check (role in ('customer', 'expert', 'block_manager', 'store_manager', 'administrator', 'admin')),
+                  check (role in ('customer', 'expert', 'block_manager', 'store_manager', 'administrator', 'support', 'admin')),
   active        boolean not null default true,
   address       text,                          -- Block Expert base/pickup address
   rate_cents    integer,                        -- Block Expert's per-session rate (null = global default)

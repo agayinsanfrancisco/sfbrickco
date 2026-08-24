@@ -45,6 +45,22 @@ describe('capability matrix', () => {
     expect(can('store_manager', 'view_contact')).toBe(false);
     expect(can('store_manager', 'refunds')).toBe(false);
   });
+  it('support: read-only — sees orders/bookings/users, can act on nothing', () => {
+    expect(can('support', 'panel')).toBe(true);
+    expect(can('support', 'view_orders')).toBe(true);
+    expect(can('support', 'view_bookings')).toBe(true);
+    expect(can('support', 'view_users')).toBe(true);
+    for (const cap of ['manage_orders', 'manage_experts', 'refunds', 'approve_applications', 'view_contact', 'manage_roles', 'payouts', 'broadcast']) {
+      expect(can('support', cap)).toBe(false);
+    }
+    expect(isStaff('support')).toBe(true);
+  });
+  it('read caps are supersets: managers keep their view caps', () => {
+    expect(can('store_manager', 'view_orders')).toBe(true);
+    expect(can('block_manager', 'view_bookings')).toBe(true);
+    expect(can('administrator', 'view_orders')).toBe(true);
+    expect(can('administrator', 'view_bookings')).toBe(true);
+  });
   it('experts and customers have no panel access at all', () => {
     expect(can('expert', 'panel')).toBe(false);
     expect(can('customer', 'panel')).toBe(false);
@@ -57,6 +73,7 @@ describe('role management rules', () => {
   it('administrators can assign manager/expert/customer but never administrator', () => {
     expect(assignableRoles('administrator')).not.toContain('administrator');
     expect(assignableRoles('administrator')).toContain('block_manager');
+    expect(assignableRoles('administrator')).toContain('support');
     expect(assignableRoles('owner')).toContain('administrator');
   });
   it('only owners may change an administrator', () => {
