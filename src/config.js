@@ -64,6 +64,8 @@ export const config = {
   },
   server: {
     port: int('PORT', 3000),
+    // Web admin dashboard access token. Unset = /admin is disabled (404).
+    adminToken: process.env.ADMIN_DASH_TOKEN || '',
   },
   cleanup: {
     // Auto-cancel unpaid orders/bookings older than this (abandoned-order sweep).
