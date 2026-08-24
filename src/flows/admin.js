@@ -718,14 +718,25 @@ export async function approveApplication(ctx, chatId, telegramId, appId) {
   try {
     await ctx.bot.sendMessage(
       app.telegram_id,
-      '🎉 *You’re approved as a Block Expert!*\n\n' +
-        `We’ve set you up from your application:\n` +
-        `• 💲 Rate: ${parseRateCents(app.rate) ? usd(parseRateCents(app.rate)) : 'not set — tap /builder → Set my rate'}\n` +
-        `• 🗓️ Hours: pre-filled from “${app.hours}” — fine-tune anytime\n` +
+      '🎉 *You’re approved — you’re live and bookable now!*\n\n' +
+        `Set up from your application:\n` +
+        `• 💲 Rate: ${parseRateCents(app.rate) ? usd(parseRateCents(app.rate)) : 'not set — tap 💲 below'}\n` +
+        `• 🗓️ Hours: pre-filled from “${app.hours}”\n` +
         `• 📍 Base: ${app.base_address}\n\n` +
-        'One step left: tap /builder and accept the *Block Expert Agreement* — you can’t receive jobs until you do. ' +
-        'Your /builder command is now in the ☰ menu. You keep your contact private until a job is paid — coordinate through the bot.',
-      { parse_mode: 'Markdown' }
+        'Tweak anything below, or just wait for your first job. Your /builder command is in the ☰ menu. ' +
+        'You keep your contact private until a job is paid — coordinate through the bot.',
+      {
+        parse_mode: 'Markdown',
+        reply_markup: {
+          inline_keyboard: [
+            [
+              { text: '🗓️ Adjust hours', callback_data: 'exp:avail' },
+              { text: '💲 Change rate', callback_data: 'exp:rate' },
+            ],
+            [{ text: '📍 Fix address', callback_data: 'exp:addr' }],
+          ],
+        },
+      }
     );
   } catch {
     /* ignore */

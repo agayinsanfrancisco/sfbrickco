@@ -155,6 +155,14 @@ export function createBot() {
       }
       return;
     }
+    if (msg.contact && s?.flow === 'apply' && s.step === 'phone') {
+      try {
+        await apply.receivePhone(ctx, chatId, msg.contact.phone_number);
+      } catch (err) {
+        await reportError(ctx, 'contact handler', err);
+      }
+      return;
+    }
     if (!msg.text || msg.text.startsWith('/')) return; // commands handled above
     if (!s) return;
 
@@ -321,6 +329,9 @@ export function createBot() {
       // Apply to be a Block Expert
       else if (data === 'apply:start') await apply.startApply(ctx, chatId, telegramId);
       else if (data.startsWith('apply:hrs:')) await apply.chooseHours(ctx, chatId, sliceAfter(data, 'apply:hrs:'));
+      else if (data.startsWith('apply:rate:')) await apply.chooseRate(ctx, chatId, sliceAfter(data, 'apply:rate:'));
+      else if (data === 'apply:agree') await apply.agreeAndSubmit(ctx, chatId, telegramId);
+      else if (data === 'apply:cancel') await apply.cancelApply(ctx, chatId);
       // Account self-service
       else if (data === 'acct:orders') await account.showMyOrders(ctx, chatId, telegramId);
       else if (data.startsWith('acct:payo:'))
