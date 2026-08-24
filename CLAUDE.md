@@ -22,11 +22,19 @@ Data in **Supabase**.
 - `express` — serves `/health` + the static landing page in `public/`
 - OpenStreetMap Nominatim — geocoding for the distance-based Uber surcharge estimate
 
-User-facing roles: **owner** (env `ADMIN_TELEGRAM_IDS`, full `/owner` panel incl.
-Test mode) and **Block Expert** (a.k.a. "builder"/"expert" in code/DB — approved
-via `/apply`, does the on-site build-help jobs, per-Block Expert rate, platform
-takes a cut). Bookings/orders relay customer ↔ Block Expert/store in-bot so no
-real Telegram handle or phone is exposed.
+User-facing roles (capability matrix in `src/lib/roles.js`, staff panel filtered
+per role): **Owner** (env `ADMIN_TELEGRAM_IDS` — everything incl. managing
+Administrators, fees/flags, Test mode) → **Administrator** (DB role
+`administrator`; both manager scopes + application approvals, refunds, payouts,
+catalog, broadcast, role management for non-admins; sees full contact info) →
+**Block Manager** (`block_manager`; edit any Block Expert's rate/address/
+schedule/active, handle bookings; no approvals, masked contact) and **Store
+Manager** (`store_manager`; store orders + crypto payment status, dispatch;
+Telegram-first — no phone numbers, last names masked) → **Block Expert**
+(a.k.a. "builder"/"expert" in code/DB — approved via `/apply` which now also
+asks for a phone number visible to Administrators+ only). Legacy DB role
+`admin` = Administrator. Bookings/orders relay customer ↔ Block Expert/store
+in-bot so no real Telegram handle or phone is exposed.
 
 ## Layout
 

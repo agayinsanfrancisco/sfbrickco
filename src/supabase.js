@@ -71,10 +71,10 @@ export async function applyBuilderInvite(user) {
 }
 
 // ── Block Expert applications (apply + approval flow) ───────────────
-export async function createApplication({ telegramId, username, name, hours, rate, baseAddress }) {
+export async function createApplication({ telegramId, username, name, hours, rate, phone, baseAddress }) {
   const { data, error } = await supabase
     .from('admin_applications')
-    .insert({ telegram_id: telegramId, username, name, hours, rate, base_address: baseAddress })
+    .insert({ telegram_id: telegramId, username, name, hours, rate, phone, base_address: baseAddress })
     .select('*')
     .single();
   if (error) throw error;

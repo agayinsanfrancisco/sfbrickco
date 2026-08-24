@@ -2,6 +2,7 @@ import TelegramBot from 'node-telegram-bot-api';
 import { config, isAdminId } from './config.js';
 import { upsertUser, getUserByTelegramId, deleteUserData } from './supabase.js';
 import { mainMenu } from './lib/keyboards.js';
+import { effectiveRole, isStaff } from './lib/roles.js';
 import { log, reportError } from './lib/log.js';
 import { SessionStore } from './lib/sessions.js';
 
@@ -64,7 +65,7 @@ export function createBot() {
         parse_mode: 'Markdown',
         ...mainMenu({
           isExpert: user?.role === 'expert' || user?.role === 'admin',
-          isAdmin: isAdminId(telegramId),
+          isAdmin: isAdminId(telegramId) || isStaff(effectiveRole(user)),
         }),
       }
     );
@@ -202,6 +203,8 @@ export function createBot() {
         await payments.applyPromo(ctx, chatId, msg.text.trim());
       } else if (s.flow === 'apply' && s.step === 'name') {
         await apply.receiveName(ctx, chatId, msg.text.trim());
+      } else if (s.flow === 'apply' && s.step === 'phone') {
+        await apply.receivePhone(ctx, chatId, msg.text.trim());
       } else if (s.flow === 'apply' && s.step === 'hours') {
         await apply.receiveHours(ctx, chatId, msg.text.trim());
       } else if (s.flow === 'apply' && s.step === 'rate') {
@@ -212,6 +215,12 @@ export function createBot() {
         await relay.relayMessage(ctx, chatId, telegramId, msg.text.trim());
       } else if (s.flow === 'admin' && s.step === 'awaiting_add_promo') {
         await admin.doAddPromo(ctx, chatId, msg.text);
+      } else if (s.flow === 'admin' && s.step === 'awaiting_exp_rate') {
+        await admin.doExpertRate(ctx, chatId, msg.text);
+      } else if (s.flow === 'admin' && s.step === 'awaiting_exp_addr') {
+        await admin.doExpertAddress(ctx, chatId, msg.text);
+      } else if (s.flow === 'admin' && s.step === 'awaiting_role_user') {
+        await admin.doPickRoleUser(ctx, chatId, telegramId, msg.text);
       }
     } catch (err) {
       await reportError(ctx, 'message handler', err);
@@ -378,6 +387,25 @@ export function createBot() {
       else if (data.startsWith('adm:test:payb:'))
         await testmode.simulateBookingPay(ctx, chatId, telegramId, sliceAfter(data, 'adm:test:payb:'));
       else if (data === 'adm:addexpert') await admin.promptAddExpert(ctx, chatId, telegramId);
+      else if (data === 'adm:experts') await admin.showExperts(ctx, chatId, telegramId);
+      else if (data.startsWith('adm:exprate:'))
+        await admin.promptExpertRate(ctx, chatId, telegramId, sliceAfter(data, 'adm:exprate:'));
+      else if (data.startsWith('adm:expaddr:'))
+        await admin.promptExpertAddress(ctx, chatId, telegramId, sliceAfter(data, 'adm:expaddr:'));
+      else if (data.startsWith('adm:expsched:'))
+        await admin.promptExpertSchedule(ctx, chatId, telegramId, sliceAfter(data, 'adm:expsched:'));
+      else if (data.startsWith('adm:expav:')) {
+        const [eid, preset] = sliceAfter(data, 'adm:expav:').split(':');
+        await admin.setExpertSchedule(ctx, chatId, telegramId, eid, preset);
+      } else if (data.startsWith('adm:exptoggle:'))
+        await admin.toggleExpertActive(ctx, chatId, telegramId, sliceAfter(data, 'adm:exptoggle:'));
+      else if (data.startsWith('adm:exp:'))
+        await admin.showExpertCard(ctx, chatId, telegramId, sliceAfter(data, 'adm:exp:'));
+      else if (data === 'adm:roles') await admin.showRoles(ctx, chatId, telegramId);
+      else if (data.startsWith('adm:setrole:')) {
+        const [tid, r] = sliceAfter(data, 'adm:setrole:').split(':');
+        await admin.doSetRole(ctx, chatId, telegramId, tid, r);
+      }
       else if (data === 'adm:remove') await admin.promptRemove(ctx, chatId, telegramId);
       else if (data === 'adm:bookings') await admin.showBookings(ctx, chatId, telegramId);
       else if (data === 'adm:orders') await admin.showOpenOrders(ctx, chatId, telegramId);

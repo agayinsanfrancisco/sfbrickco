@@ -43,7 +43,23 @@ export async function startApply(ctx, chatId, telegramId = chatId) {
 export async function receiveName(ctx, chatId, name) {
   const s = ctx.sessions.get(chatId);
   if (s?.flow !== 'apply' || s.step !== 'name') return;
-  ctx.sessions.set(chatId, { ...s, step: 'hours', data: { ...s.data, name } });
+  ctx.sessions.set(chatId, { ...s, step: 'phone', data: { ...s.data, name } });
+  await ctx.bot.sendMessage(
+    chatId,
+    'What’s your *phone number*? (Kept private — day-to-day coordination stays in Telegram; only company Administrators can see it.)',
+    { parse_mode: 'Markdown', reply_markup: { force_reply: true, input_field_placeholder: '+1 415 555 0123' } }
+  );
+}
+
+export async function receivePhone(ctx, chatId, phone) {
+  const s = ctx.sessions.get(chatId);
+  if (s?.flow !== 'apply' || s.step !== 'phone') return;
+  const digits = String(phone).replace(/[^0-9]/g, '');
+  if (digits.length < 7) {
+    await ctx.bot.sendMessage(chatId, 'That doesn’t look like a phone number — try again (e.g. +1 415 555 0123).');
+    return;
+  }
+  ctx.sessions.set(chatId, { ...s, step: 'hours', data: { ...s.data, phone: String(phone).trim() } });
   await ctx.bot.sendMessage(
     chatId,
     'What *hours* would you like to operate? (e.g. “Mon–Fri 9am–6pm, weekends flexible”)',
@@ -88,6 +104,7 @@ export async function receiveAddress(ctx, chatId, telegramId, username, baseAddr
     name: s.data.name,
     hours: s.data.hours,
     rate: s.data.rate,
+    phone: s.data.phone || null,
     baseAddress,
   });
   await ctx.bot.sendMessage(
