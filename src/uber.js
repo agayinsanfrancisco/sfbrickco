@@ -30,7 +30,7 @@ const geocodeCache = new Map();
 
 // Geocode a free-text address to {lat, lng} using OpenStreetMap Nominatim.
 // Returns null if it can't be resolved.
-async function geocode(address) {
+export async function geocode(address) {
   const key = String(address).trim().toLowerCase();
   if (geocodeCache.has(key)) return geocodeCache.get(key);
   const url = `${config.uber.nominatimUrl}?format=json&limit=1&q=${encodeURIComponent(address)}`;

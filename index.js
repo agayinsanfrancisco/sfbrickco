@@ -10,6 +10,7 @@ import {
   getUserById,
 } from './src/supabase.js';
 import { promptReview } from './src/flows/review.js';
+import { listPendingApplications } from './src/supabase.js';
 import { watchOnce } from './src/watcher.js';
 import { log } from './src/lib/log.js';
 import { fmtHourRange } from './src/lib/format.js';
@@ -102,6 +103,31 @@ function startReminderScheduler(ctx) {
   tick();
 }
 
+// Owner nudge: applications pending for more than a day (checked every 6h).
+function startApplicationReminder(ctx) {
+  const tick = async () => {
+    try {
+      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+      const stale = (await listPendingApplications()).filter((a) => new Date(a.created_at).getTime() < cutoff);
+      if (!stale.length) return;
+      for (const adminId of config.adminIds) {
+        try {
+          await ctx.bot.sendMessage(
+            adminId,
+            `⏰ ${stale.length} Block Expert application(s) have been waiting over 24h — review them in /owner → People → Apps.`
+          );
+        } catch {
+          /* owner hasn't opened the bot */
+        }
+      }
+    } catch (err) {
+      log.error(`application reminder error: ${err.message}`);
+    }
+  };
+  setInterval(tick, 6 * 60 * 60 * 1000);
+  tick();
+}
+
 function main() {
   for (const w of validateConfig()) log.warn(`config: ${w}`);
   const { bot, ctx } = createBot();
@@ -116,6 +142,7 @@ function main() {
   startPaymentWatcher(ctx);
   startCleanupSweep();
   startReminderScheduler(ctx);
+  startApplicationReminder(ctx);
 
   const shutdown = (sig) => {
     console.log(`\n${sig} received, shutting down…`);

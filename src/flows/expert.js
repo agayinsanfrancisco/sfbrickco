@@ -36,7 +36,7 @@ function ratingLine(summary) {
 
 // The contractor / non-circumvention agreement every builder must accept once
 // before they can work. Stored as users.builder_agreement_at.
-const BUILDER_AGREEMENT =
+export const BUILDER_AGREEMENT =
   '🤝 *Block Expert Agreement*\n\n' +
   'Before you can take jobs, please confirm you agree to the following:\n\n' +
   '• You are an *independent contractor* — not an employee, agent, or partner of SF Brick Company — and you’re responsible for your own taxes, conduct, and safety.\n' +
