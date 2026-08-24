@@ -42,6 +42,7 @@
   .pill.paid, .pill.accepted { color: var(--ok); border-color: currentColor; }
   .pill.pending, .pill.awaiting_payment, .pill.awaiting_acceptance { color: #b45309; border-color: currentColor; }
   .pill.refunded, .pill.cancelled { color: var(--brick); border-color: currentColor; }
+  td select, td input { font: inherit; font-size: 13px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--ink); }
   button.act { border: 1px solid var(--line); background: var(--panel); border-radius: 6px;
     padding: 4px 10px; font: inherit; font-size: 13px; cursor: pointer; }
   button.act:hover { border-color: var(--ink); }
@@ -90,8 +91,8 @@
 <div id="msg"></div>
 
 <script>
-const TABS = ['Overview', 'Applicants', 'Orders', 'Bookings', 'Users'];
-let cur = 'Overview';
+const TABS = ['Queue', 'Orders', 'Bookings', 'Users', 'Inventory'];
+let cur = 'Queue';
 let counts = {};
 
 const $ = (id) => document.getElementById(id);
@@ -127,7 +128,7 @@ async function logout() { await fetch('/admin/logout', { method: 'POST' }); show
 
 function drawTabs() {
   $('tabs').innerHTML = TABS.map((t) => {
-    const n = t === 'Applicants' ? counts.pendingApplications : t === 'Orders' ? counts.ordersAwaitingDispatch : 0;
+    const n = t === 'Queue' ? (counts.pendingApplications||0) + (counts.ordersAwaitingDispatch||0) + (counts.openBookings||0) : 0;
     return `<button class="${t === cur ? 'on' : ''}" onclick="go('${t}')">${t}${n ? `<span class="badge">${n}</span>` : ''}</button>`;
   }).join('');
 }
@@ -147,22 +148,51 @@ async function render() {
   const v = $('view');
   v.innerHTML = '<div class="empty">Loading…</div>';
   try {
-    if (cur === 'Overview') {
+    if (cur === 'Queue') {
+      const [q, experts] = await Promise.all([api('/queue'), api('/experts')]);
       const c = counts;
-      v.innerHTML = `<div class="cards">
-        ${[['Pending applicants', c.pendingApplications], ['Orders to dispatch', c.ordersAwaitingDispatch],
-           ['Open bookings', c.openBookings], ['Awaiting payment', c.bookingsAwaitingPayment],
-           ['Users', c.users], ['Active Block Experts', c.experts]]
+      let html = `<div class="cards">
+        ${[['To approve', q.applications.length], ['To dispatch', q.dispatch.length],
+           ['To assign', q.openBookings.length], ['Fares to confirm', q.faresNeeded.length],
+           ['Payouts owed', q.payouts.length], ['Users', c.users]]
           .map(([l, n]) => `<div class="card"><div class="n">${n ?? 0}</div><div class="l">${l}</div></div>`).join('')}
       </div>`;
-    } else if (cur === 'Applicants') {
-      const apps = await api('/applications');
-      v.innerHTML = table(['Name', 'Handle', 'Hours', 'Rate', 'Base address', 'Applied', ''],
-        apps.map((a) => `<tr><td>${esc(a.name)}</td><td>${a.username ? '@' + esc(a.username) : '—'}</td>
-          <td class="wrap">${esc(a.hours)}</td><td>${esc(a.rate)}</td><td class="wrap">${esc(a.base_address)}</td>
-          <td>${when(a.created_at)}</td>
-          <td><button class="act primary" onclick="act('/applications/${a.id}/approve','Approved')">Approve</button>
-              <button class="act" onclick="act('/applications/${a.id}/reject','Rejected')">Reject</button></td></tr>`));
+      const sec = (title, rows, head) => rows.length
+        ? `<h2 class="sec">${title}</h2>` + table(head, rows) : '';
+      html += sec('🧰 Applications to review', q.applications.map((a) =>
+        `<tr><td>${esc(a.name)}</td><td class="wrap">${esc(a.hours)}</td><td>${esc(a.rate)}</td>
+         <td>${esc(a.phone || '—')}</td><td class="wrap">${esc(a.base_address)}</td>
+         <td><button class="act primary" onclick="act('/applications/${a.id}/approve','Approved')">Approve</button>
+             <button class="act" onclick="act('/applications/${a.id}/reject','Rejected')">Reject</button></td></tr>`),
+        ['Name', 'Hours', 'Rate', 'Phone', 'Base', '']);
+      html += sec('📦 Orders to dispatch', q.dispatch.map((o) =>
+        `<tr><td>${ref(o.id)}</td><td class="wrap">${esc(o.delivery_address)}</td><td>${esc(o.contact_phone || '—')}</td>
+         <td>${usd((o.amount_cents||0)+(o.delivery_fee_cents||0))}</td>
+         <td><button class="act primary" onclick="act('/orders/${o.id}/dispatch','Dispatched')">🚚 Dispatch</button></td></tr>`),
+        ['Ref', 'Deliver to', 'Phone', 'Total', '']);
+      const expertOpts = experts.map((e) => `<option value="${e.id}">${esc(e.full_name || e.username)}</option>`).join('');
+      html += sec('👤 Open bookings — assign a Block Expert', q.openBookings.map((b) =>
+        `<tr><td>${when(b.slot_start)}</td><td class="wrap">${esc(b.customer_address)}</td>
+         <td><select id="as-${b.id}">${expertOpts}</select>
+             <button class="act primary" onclick="assign('${b.id}')">Assign</button></td></tr>`),
+        ['Slot', 'Address', '']);
+      html += sec('💸 Fares to confirm', q.faresNeeded.map((b) =>
+        `<tr><td>${when(b.slot_start)}</td><td class="wrap">${esc(b.customer_address)}</td>
+         <td><input id="fare-${b.id}" size="6" placeholder="14.50">
+             <button class="act primary" onclick="fare('${b.id}')">Set fare</button></td></tr>`),
+        ['Slot', 'Address', '']);
+      html += sec('⏳ Awaiting payment — log if paid another way', q.awaitingPayment.map((b) =>
+        `<tr><td>${ref(b.id)}</td><td>${when(b.slot_start)}</td><td>${usd(b.total_cents)}</td>
+         <td><button class="act" onclick="if(confirm('Mark this booking paid?'))act('/bookings/${b.id}/paid','Payment logged')">✅ Log payment</button></td></tr>`),
+        ['Ref', 'Slot', 'Total', '']);
+      html += sec('💰 Payouts owed', q.payouts.map((p) =>
+        `<tr><td>${esc(p.name)}</td><td>${p.jobs} job(s)</td><td>${usd(p.owedCents)}</td>
+         <td><button class="act" onclick="if(confirm('Record that you sent ${usd(p.owedCents)}?'))act('/payouts/${p.expertId}?amt=${p.owedCents}','Payout recorded')">💸 Mark paid</button></td></tr>`),
+        ['Block Expert', 'Jobs', 'Owed', '']);
+      if (!q.applications.length && !q.dispatch.length && !q.openBookings.length && !q.faresNeeded.length && !q.awaitingPayment.length && !q.payouts.length) {
+        html += '<div class="tablewrap" style="margin-top:18px"><div class="empty">🎉 Nothing needs you right now.</div></div>';
+      }
+      v.innerHTML = html;
     } else if (cur === 'Orders') {
       const orders = await api('/orders');
       v.innerHTML = table(['Ref', 'Created', 'Items', 'Total', 'Status', 'Address', ''],
@@ -186,9 +216,21 @@ async function render() {
           row(x, `<button class="act" onclick="if(confirm('Mark refunded?'))act('/bookings/${x.id}/refund','Marked refunded')">Refund</button>`)));
     } else if (cur === 'Users') {
       const users = await api('/users');
-      v.innerHTML = table(['Name', 'Handle', 'Telegram ID', 'Role', 'Active', 'Joined'],
+      const ROLES = ['customer', 'expert', 'support', 'store_manager', 'block_manager', 'administrator'];
+      v.innerHTML = table(['Name', 'Handle', 'Telegram ID', 'Role', 'Active', ''],
         users.map((u) => `<tr><td>${esc(u.full_name || '—')}</td><td>${u.username ? '@' + esc(u.username) : '—'}</td>
-          <td>${u.telegram_id}</td><td>${esc(u.role)}</td><td>${u.active ? 'yes' : 'no'}</td><td>${when(u.created_at)}</td></tr>`));
+          <td>${u.telegram_id}</td>
+          <td><select id="role-${u.telegram_id}">${ROLES.map((r) => `<option value="${r}" ${((u.role==='admin'?'administrator':u.role)===r)?'selected':''}>${r.replace('_',' ')}</option>`).join('')}</select>
+              <button class="act" onclick="setRole(${u.telegram_id})">Set</button></td>
+          <td>${u.active ? '🟢' : '🔴'}</td>
+          <td><button class="act" onclick="act('/users/${u.telegram_id}/active?on=${u.active ? 0 : 1}','${u.active ? 'Deactivated' : 'Activated'}')">${u.active ? 'Deactivate' : 'Activate'}</button></td></tr>`));
+    } else if (cur === 'Inventory') {
+      const items = await api('/inventory');
+      v.innerHTML = table(['Product', 'SKU', 'Stock', 'Price', ''],
+        items.map((it) => `<tr><td>${esc(it.name)}</td><td>${esc(it.sku)}</td>
+          <td><input id="stk-${it.sku}" size="4" value="${it.stock_qty}"></td>
+          <td><input id="prc-${it.sku}" size="6" value="${((it.unit_price_cents||0)/100).toFixed(2)}"></td>
+          <td><button class="act primary" onclick="saveItem('${it.sku}')">Save</button></td></tr>`));
     }
   } catch (err) {
     if (err.message !== 'unauthorized') v.innerHTML = `<div class="empty">Error: ${esc(err.message)}</div>`;
@@ -196,7 +238,38 @@ async function render() {
 }
 
 async function act(path, okMsg) {
-  try { await post(path); toast(okMsg); refresh(); } catch (err) { toast('⚠ ' + err.message); }
+  try {
+    const url = new URL(path, location.origin);
+    let body = {};
+    if (url.searchParams.has('amt')) body.amountCents = Number(url.searchParams.get('amt'));
+    if (url.searchParams.has('on')) body.active = url.searchParams.get('on') === '1';
+    await api(url.pathname.replace('/admin/api',''), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    toast(okMsg); refresh();
+  } catch (err) { toast('⚠ ' + err.message); }
+}
+async function assign(id) {
+  const expertId = document.getElementById('as-' + id).value;
+  try { await api(`/bookings/${id}/assign`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expertId }) }); toast('Assigned'); refresh(); }
+  catch (err) { toast('⚠ ' + err.message); }
+}
+async function fare(id) {
+  const dollars = document.getElementById('fare-' + id).value;
+  try { await api(`/bookings/${id}/fare`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dollars }) }); toast('Fare set — customer notified'); refresh(); }
+  catch (err) { toast('⚠ ' + err.message); }
+}
+async function setRole(tid) {
+  const role = document.getElementById('role-' + tid).value;
+  try { await api(`/users/${tid}/role`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ role }) }); toast('Role set'); refresh(); }
+  catch (err) { toast('⚠ ' + err.message); }
+}
+async function saveItem(sku) {
+  const qty = document.getElementById('stk-' + sku).value;
+  const dollars = document.getElementById('prc-' + sku).value;
+  try {
+    await api(`/inventory/${sku}/stock`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ qty: Number(qty) }) });
+    await api(`/inventory/${sku}/price`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ dollars: Number(dollars) }) });
+    toast('Saved'); refresh();
+  } catch (err) { toast('⚠ ' + err.message); }
 }
 
 // Boot: probe auth state.
