@@ -2,17 +2,17 @@
 -- SF Brick Company — demo seed data (idempotent)
 --
 -- Purpose: populate the bot so you can mimic the real flows end-to-end —
--- multiple Administrators to book, ratings, a repeat customer, and wallet
+-- multiple Block Experts to book, ratings, a repeat customer, and wallet
 -- balances. Safe to re-run: it resets only the demo rows it owns.
 --
--- Demo Administrators use telegram_ids in the 900000000+ range so they are easy
+-- Demo Block Experts use telegram_ids in the 900000000+ range so they are easy
 -- to spot and remove. They are NOT real Telegram accounts, so the bot can't DM
 -- them (those sends are caught and ignored) — they exist to populate the UI.
 --
 -- To remove ALL demo data, run src/db/seed_teardown.sql.
 -- ============================================================================
 
--- 1) Demo Administrators (experts) -------------------------------------------
+-- 1) Demo Block Experts (experts) -------------------------------------------
 insert into users (telegram_id, username, full_name, role, active, rate_cents, address) values
   (900000001, 'alex_brick',  'Alex Brick',  'expert', true, 4000, '500 Howard St, San Francisco, CA 94105'),
   (900000002, 'sam_stud',    'Sam Stud',    'expert', true, 5500, '1 Dr Carlton B Goodlett Pl, San Francisco, CA 94102'),
@@ -74,7 +74,7 @@ select 8621244395, '[DEMO] 555 Hayes St, San Francisco, CA 94102',
        5500, 1500, 'manual', false, 7000, 'paid', 'completed', true,
        now() - interval '3 days', now() - interval '3 days';
 
--- 4) Reviews → drive the ⭐ ratings shown when a customer picks an Administrator.
+-- 4) Reviews → drive the ⭐ ratings shown when a customer picks a Block Expert.
 insert into reviews (customer_telegram_id, expert_id, rating, comment) values
   (8524453004, (select id from users where telegram_id = 900000001), 5, 'Super helpful, built fast!'),
   (8621244395, (select id from users where telegram_id = 900000001), 4, 'Great work, on time.'),

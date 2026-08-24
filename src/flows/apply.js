@@ -1,15 +1,35 @@
 import { config } from '../config.js';
-import { createApplication } from '../supabase.js';
+import { createApplication, getPendingApplication, getUserByTelegramId } from '../supabase.js';
 
-// Multi-step application to become an Administrator. Anyone can apply; the owner
-// reviews + approves in the owner panel.
-export async function startApply(ctx, chatId) {
+// Multi-step application to become a Block Expert. Anyone can apply, but every
+// application is gated: it sits in `admin_applications` as `pending` until an
+// owner explicitly approves it (adm:appok) — only then is the user promoted to
+// the expert role. One pending application per person; already-approved Block
+// Experts are pointed at their portal instead.
+export async function startApply(ctx, chatId, telegramId = chatId) {
+  const user = await getUserByTelegramId(telegramId);
+  if (user && (user.role === 'expert' || user.role === 'admin') && user.active) {
+    await ctx.bot.sendMessage(
+      chatId,
+      '🧰 You’re already a Block Expert! Open your portal with /builder.'
+    );
+    return;
+  }
+  const pending = await getPendingApplication(telegramId);
+  if (pending) {
+    await ctx.bot.sendMessage(
+      chatId,
+      '⏳ Your Block Expert application is already *under review* — we’ll message you as soon as it’s approved or declined.',
+      { parse_mode: 'Markdown' }
+    );
+    return;
+  }
   const fee = config.pricing.platformFeePct;
   ctx.sessions.set(chatId, { flow: 'apply', step: 'name', data: {} });
   await ctx.bot.sendMessage(
     chatId,
-    '🧰 *Apply to be an Administrator*\n\n' +
-      'Administrators are vetted local builders who take *on-site, 1-hour sessions* helping customers build. Here’s what you’re signing up for:\n\n' +
+    '🧰 *Apply to be a Block Expert*\n\n' +
+      'Block Experts are vetted local builders who take *on-site, 1-hour sessions* helping customers build. Here’s what you’re signing up for:\n\n' +
       `• 💲 *You set your own rate* per session. We keep a *${fee}% platform fee*; you keep *${100 - fee}%*.\n` +
       '• 🗓️ *You set your hours* — customers can only book you when you’re available, and you can block time off anytime.\n' +
       '• 📍 You travel to the customer (they cover the ride or a flat travel fee).\n' +
@@ -72,14 +92,14 @@ export async function receiveAddress(ctx, chatId, telegramId, username, baseAddr
   });
   await ctx.bot.sendMessage(
     chatId,
-    '✅ Application submitted! We’ll review it and let you know. Thanks for your interest in joining as an Administrator.'
+    '✅ Application submitted! We’ll review it and let you know. Thanks for your interest in joining as a Block Expert.'
   );
   // Notify owners for review.
   for (const adminId of config.adminIds) {
     try {
       await ctx.bot.sendMessage(
         adminId,
-        `🧰 *New Administrator application*\n` +
+        `🧰 *New Block Expert application*\n` +
           `👤 ${s.data.name}${username ? ` (@${username})` : ''}\n` +
           `🕑 ${s.data.hours}\n💲 ${s.data.rate}\n📍 ${baseAddress}`,
         {

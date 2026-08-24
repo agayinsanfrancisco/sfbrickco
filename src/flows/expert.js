@@ -37,7 +37,7 @@ function ratingLine(summary) {
 // The contractor / non-circumvention agreement every builder must accept once
 // before they can work. Stored as users.builder_agreement_at.
 const BUILDER_AGREEMENT =
-  '🤝 *Administrator Agreement*\n\n' +
+  '🤝 *Block Expert Agreement*\n\n' +
   'Before you can take jobs, please confirm you agree to the following:\n\n' +
   '• You are an *independent contractor* — not an employee, agent, or partner of SF Brick Company — and you’re responsible for your own taxes, conduct, and safety.\n' +
   '• *Non-circumvention:* all bookings, rebookings, and payments with customers you meet through SF Brick Company go *through the platform*. Taking a customer off-platform (or sharing contact info to do so) is grounds for immediate removal and forfeiture of pending payouts.\n' +
@@ -75,11 +75,11 @@ export async function declineBuilderAgreement(ctx, chatId) {
 async function ensureExpert(ctx, chatId, telegramId) {
   const user = await getUserByTelegramId(telegramId);
   if (!user || (user.role !== 'expert' && user.role !== 'admin')) {
-    await ctx.bot.sendMessage(chatId, 'This area is for SF Brick Co Administrators only.');
+    await ctx.bot.sendMessage(chatId, 'This area is for SF Brick Co Block Experts only.');
     return null;
   }
   if (!user.active) {
-    await ctx.bot.sendMessage(chatId, 'Your Administrator account is currently inactive.');
+    await ctx.bot.sendMessage(chatId, 'Your Block Expert account is currently inactive.');
     return null;
   }
   if (!user.builder_agreement_at) {
@@ -90,7 +90,7 @@ async function ensureExpert(ctx, chatId, telegramId) {
 }
 
 // Card for an open job. Travel is fixed at request time (flat fee or the
-// customer books the ride), so it's the same for every Administrator.
+// customer books the ride), so it's the same for every Block Expert.
 function openJobCard(booking) {
   const travel = booking.customer_books_ride
     ? '🚗 Customer books your ride'
@@ -125,7 +125,7 @@ export async function doSetAddress(ctx, chatId, telegramId, text) {
   );
 }
 
-// Per-Administrator rate (what the customer pays); we take a platform fee.
+// Per-Block Expert rate (what the customer pays); we take a platform fee.
 export async function promptSetRate(ctx, chatId, telegramId) {
   const user = await ensureExpert(ctx, chatId, telegramId);
   if (!user) return;
@@ -167,12 +167,12 @@ export async function builderPortal(ctx, chatId, telegramId) {
   if (!user || (user.role !== 'expert' && user.role !== 'admin')) {
     await ctx.bot.sendMessage(
       chatId,
-      '👷 You’re not registered as an Administrator yet. Ask the team to add your @handle, then tap /builder again.'
+      '👷 You’re not registered as a Block Expert yet. Ask the team to add your @handle, then tap /builder again.'
     );
     return;
   }
   if (!user.active) {
-    await ctx.bot.sendMessage(chatId, 'Your Administrator account is currently inactive.');
+    await ctx.bot.sendMessage(chatId, 'Your Block Expert account is currently inactive.');
     return;
   }
   if (!user.builder_agreement_at) {
@@ -188,7 +188,7 @@ export async function builderPortal(ctx, chatId, telegramId) {
   const owed = Math.max(0, netEarned - earnings.paidOutCents);
   const rateStr = user.rate_cents != null ? usd(user.rate_cents) : `${usd(config.pricing.serviceFeeCents)} (default)`;
   let body =
-    `👷 *Administrator portal*\n📍 Base address: ${user.address || '— not set —'}\n` +
+    `👷 *Block Expert portal*\n📍 Base address: ${user.address || '— not set —'}\n` +
     `💲 Your rate: ${rateStr}\n${ratingLine(rating)}\n` +
     `💵 Earned ${usd(netEarned)} across ${earnings.jobs} paid job${earnings.jobs === 1 ? '' : 's'} · paid out ${usd(
       earnings.paidOutCents
@@ -520,24 +520,24 @@ export async function cancelJob(ctx, chatId, telegramId, bookingId) {
       /* ignore */
     }
     const rating = await expertRatingSummary(replacement.id);
-    const rname = replacement.full_name || (replacement.username ? `@${replacement.username}` : 'another Administrator');
+    const rname = replacement.full_name || (replacement.username ? `@${replacement.username}` : 'another Block Expert');
     try {
       await ctx.bot.sendMessage(
         booking.customer_telegram_id,
-        `🔄 Your Administrator had to cancel — *${rname}* (${ratingLine(rating)}) has taken over your ${when} booking. No action needed.`,
+        `🔄 Your Block Expert had to cancel — *${rname}* (${ratingLine(rating)}) has taken over your ${when} booking. No action needed.`,
         { parse_mode: 'Markdown' }
       );
     } catch {
       /* ignore */
     }
-    await ctx.bot.sendMessage(chatId, '✅ Cancelled — reassigned to another available Administrator.');
+    await ctx.bot.sendMessage(chatId, '✅ Cancelled — reassigned to another available Block Expert.');
   } else {
     await markBookingCancelled(bookingId);
     const refundNote = booking.payment_status === 'paid' ? ' We’ll arrange a reschedule or refund.' : '';
     try {
       await ctx.bot.sendMessage(
         booking.customer_telegram_id,
-        `⚠️ Your Administrator had to cancel your ${when} booking and no one else is available for that time.${refundNote}\nPlease chat with support:`,
+        `⚠️ Your Block Expert had to cancel your ${when} booking and no one else is available for that time.${refundNote}\nPlease chat with support:`,
         { reply_markup: { inline_keyboard: [[{ text: '💬 Chat with support', url: 'https://t.me/redbluebrick' }]] } }
       );
     } catch {
@@ -547,7 +547,7 @@ export async function cancelJob(ctx, chatId, telegramId, bookingId) {
       try {
         await ctx.bot.sendMessage(
           adminId,
-          `⚠️ Booking ${shortRef(bookingId)} (${when}) — Administrator cancelled, no replacement available. ` +
+          `⚠️ Booking ${shortRef(bookingId)} (${when}) — Block Expert cancelled, no replacement available. ` +
             `${booking.payment_status === 'paid' ? 'PAID — needs refund/reschedule.' : 'unpaid.'} Customer routed to support.`
         );
       } catch {
@@ -585,7 +585,7 @@ export async function accept(ctx, chatId, telegramId, bookingId) {
   // Travel + total are already fixed on the booking (flat fee or own-ride).
   const accepted = await acceptOpenBooking(bookingId, user.id);
   if (!accepted) {
-    await ctx.bot.sendMessage(chatId, 'Too late — another Administrator grabbed that one.');
+    await ctx.bot.sendMessage(chatId, 'Too late — another Block Expert grabbed that one.');
     return;
   }
   const travelNote = accepted.customer_books_ride
@@ -600,7 +600,7 @@ export async function accept(ctx, chatId, telegramId, bookingId) {
   try {
     await ctx.bot.sendMessage(
       accepted.customer_telegram_id,
-      `🎉 An Administrator (${ratingLine(rating)}) accepted your booking for ${fmtHourRange(accepted.slot_start, accepted.slot_end)}!\n` +
+      `🎉 A Block Expert (${ratingLine(rating)}) accepted your booking for ${fmtHourRange(accepted.slot_start, accepted.slot_end)}!\n` +
         `• *Total: ${usd(accepted.total_cents)}*\nTap to pay:`,
       {
         parse_mode: 'Markdown',
@@ -613,7 +613,7 @@ export async function accept(ctx, chatId, telegramId, bookingId) {
 }
 
 export async function decline(ctx, chatId, _bookingId) {
-  await ctx.bot.sendMessage(chatId, 'Skipped — it stays open for other Administrators.');
+  await ctx.bot.sendMessage(chatId, 'Skipped — it stays open for other Block Experts.');
 }
 
 // Notify active builders of a new open job (each sees travel from their

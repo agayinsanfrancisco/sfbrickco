@@ -55,7 +55,7 @@ const WAIVER_ORDER =
 const WAIVER_BOOKING =
   '⚠️ *Before you pay — please read carefully*\n\n' +
   'By tapping *“I agree”* you acknowledge and agree that:\n' +
-  '• Administrators are *independent third-party contractors*. They are NOT employees, agents, partners, or affiliates of SF Brick Company, @redbluebrick\\_bot, or their owners/operators, who act solely as a venue connecting you with the Administrator and are not a party to, and bear no responsibility for, the session or the Administrator’s conduct.\n' +
+  '• Block Experts are *independent third-party contractors*. They are NOT employees, agents, partners, or affiliates of SF Brick Company, @redbluebrick\\_bot, or their owners/operators, who act solely as a venue connecting you with the Block Expert and are not a party to, and bear no responsibility for, the session or the Block Expert’s conduct.\n' +
   '• You assume *all risks* of an in-person, on-site session — including any bodily injury, property damage, theft, or loss — whether arising from negligence or otherwise.\n' +
   '• The service is provided *“AS IS”*. To the maximum extent permitted by law, SF Brick Company and its owners/operators disclaim *all liability* and all warranties, and you agree to *indemnify, defend, and hold them harmless* from any and all claims, damages, or expenses arising from your booking.\n' +
   '• You are at least 18, you authorize entry to the address you provided, and you enter this agreement knowingly and voluntarily.\n\n' +
@@ -581,9 +581,9 @@ export async function confirmBooking(ctx, booking, { auto = false } = {}) {
   try {
     await ctx.bot.sendMessage(
       paid.customer_telegram_id,
-      `✅ Payment confirmed! Your Administrator is booked for ${when}.\n` +
+      `✅ Payment confirmed! Your Block Expert is booked for ${when}.\n` +
         'Need to share gate codes or timing? Message them right here — your contact stays private.',
-      { reply_markup: { inline_keyboard: [[{ text: '💬 Message your Administrator', callback_data: `relay:b:customer:${paid.id}` }]] } }
+      { reply_markup: { inline_keyboard: [[{ text: '💬 Message your Block Expert', callback_data: `relay:b:customer:${paid.id}` }]] } }
     );
   } catch {
     /* ignore */

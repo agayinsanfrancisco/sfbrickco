@@ -2,7 +2,7 @@ import { config } from '../config.js';
 import { getBooking, getUserById, getOrder } from '../supabase.js';
 import { shortRef } from '../lib/format.js';
 
-// In-bot relay: the two sides of a booking (customer ↔ Administrator) or an
+// In-bot relay: the two sides of a booking (customer ↔ Block Expert) or an
 // order (customer ↔ store) message each other through the bot, so nobody's
 // real Telegram handle or phone is exposed (privacy + keeps it on-platform).
 // Bookings relay only once paid; orders relay once paid (dispatch coordination).
@@ -21,7 +21,7 @@ async function orderParties(orderId) {
   return { customerId: o.telegram_id, adminIds: config.adminIds };
 }
 
-const OTHER = { customer: 'Administrator', admin: 'customer' };
+const OTHER = { customer: 'Block Expert', admin: 'customer' };
 const OTHER_ORDER = { customer: 'store', admin: 'customer' };
 
 // Open a relay "compose" session. kind: 'b' (booking) | 'o' (order).

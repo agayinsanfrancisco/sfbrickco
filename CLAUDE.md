@@ -23,9 +23,9 @@ Data in **Supabase**.
 - OpenStreetMap Nominatim — geocoding for the distance-based Uber surcharge estimate
 
 User-facing roles: **owner** (env `ADMIN_TELEGRAM_IDS`, full `/owner` panel incl.
-Test mode) and **Administrator** (a.k.a. "builder"/"expert" in code/DB — approved
-via `/apply`, does the on-site build-help jobs, per-Administrator rate, platform
-takes a cut). Bookings/orders relay customer ↔ Administrator/store in-bot so no
+Test mode) and **Block Expert** (a.k.a. "builder"/"expert" in code/DB — approved
+via `/apply`, does the on-site build-help jobs, per-Block Expert rate, platform
+takes a cut). Bookings/orders relay customer ↔ Block Expert/store in-bot so no
 real Telegram handle or phone is exposed.
 
 ## Layout
@@ -39,11 +39,11 @@ real Telegram handle or phone is exposed.
 - `src/uber.js` — surcharge estimate (option A) + manual parse (option B)
 - `src/bot.js` — command/callback/text routing, session state
 - `src/server.js` — Express (`/health` + static landing page)
-- `src/flows/` — `shop`, `booking`, `expert` (Administrator portal: availability,
+- `src/flows/` — `shop`, `booking`, `expert` (Block Expert portal: availability,
   time-off, jobs, cancel/reassign), `admin` (owner panel: users, pricing, fees,
-  Test mode, reports), `account` (help/orders/forget-me), `apply` (become an
-  Administrator), `wallet` (prepaid balance + buy-a-6-pack bonus), `relay`
-  (in-bot customer ↔ Administrator/store messaging, paid orders/bookings only),
+  Test mode, reports), `account` (help/orders/forget-me), `apply` (become a
+  Block Expert), `wallet` (prepaid balance + buy-a-6-pack bonus), `relay`
+  (in-bot customer ↔ Block Expert/store messaging, paid orders/bookings only),
   `testmode` (owner-only: view-as any role, simulate payments), `review`,
   `payments`
 - `src/lib/` — `slots` (availability), `keyboards`, `format`, `pricing`, `money`
@@ -75,8 +75,8 @@ real Telegram handle or phone is exposed.
   per-mile rate, `UBER_BASE_CENTS`/`UBER_PER_MILE_CENTS`); option B = flat
   fallback (`UBER_FLAT_FALLBACK_CENTS`) when geocoding fails, an owner can
   confirm the real fare manually.
-- **Platform fee** on Administrator jobs is `PLATFORM_FEE_PCT` (currently 30%,
-  taken from the Administrator's rate, not added on top of the customer price).
+- **Platform fee** on Block Expert jobs is `PLATFORM_FEE_PCT` (currently 30%,
+  taken from the Block Expert's rate, not added on top of the customer price).
 - **Wallet bonus:** credited on a buyer's first qualifying 6-pack purchase only
   (once per buyer), not on every order.
 - **Rename done:** working dir, GitHub repo (`agayinsanfrancisco/sfbrickco`), and

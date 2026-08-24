@@ -66,7 +66,7 @@ export async function showTestMode(ctx, chatId, telegramId) {
 export async function setMode(ctx, chatId, telegramId, mode) {
   if (!guard(ctx, chatId, telegramId)) return;
   if (mode === 'expert') {
-    // Provision the essentials so the owner is a fully bookable Administrator.
+    // Provision the essentials so the owner is a fully bookable Block Expert.
     const user = await getUserByTelegramId(telegramId);
     await setRole(telegramId, 'expert');
     if (user?.rate_cents == null) await setUserRate(telegramId, 4000);
@@ -148,7 +148,7 @@ export async function simulateOrderPay(ctx, chatId, telegramId, orderId) {
   await ctx.bot.sendMessage(chatId, ok ? '✅ Simulated payment — order confirmed.' : 'Already confirmed.');
 }
 
-// Remove the seeded demo Administrators, their bookings/reviews/availability,
+// Remove the seeded demo Block Experts, their bookings/reviews/availability,
 // and the seeded wallet balances. Mirrors src/db/seed_teardown.sql.
 export async function cleanDemoData(ctx, chatId, telegramId) {
   if (!guard(ctx, chatId, telegramId)) return;
@@ -156,7 +156,7 @@ export async function cleanDemoData(ctx, chatId, telegramId) {
   await ctx.bot.sendMessage(
     chatId,
     removed
-      ? `🧹 Demo data removed — ${removed} demo Administrator${removed === 1 ? '' : 's'} (and their bookings, reviews, availability) deleted; seeded wallet balances zeroed.`
+      ? `🧹 Demo data removed — ${removed} demo Block Expert${removed === 1 ? '' : 's'} (and their bookings, reviews, availability) deleted; seeded wallet balances zeroed.`
       : '🧹 Nothing to clean — demo data was already removed.'
   );
 }

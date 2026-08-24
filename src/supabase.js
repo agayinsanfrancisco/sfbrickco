@@ -70,7 +70,7 @@ export async function applyBuilderInvite(user) {
   return updated || user;
 }
 
-// ── Administrator applications (apply + approval flow) ───────────────
+// ── Block Expert applications (apply + approval flow) ───────────────
 export async function createApplication({ telegramId, username, name, hours, rate, baseAddress }) {
   const { data, error } = await supabase
     .from('admin_applications')
@@ -79,6 +79,18 @@ export async function createApplication({ telegramId, username, name, hours, rat
     .single();
   if (error) throw error;
   return data;
+}
+
+// A user's own pending application, if any — used to block duplicate /apply.
+export async function getPendingApplication(telegramId) {
+  const { data } = await supabase
+    .from('admin_applications')
+    .select('*')
+    .eq('telegram_id', telegramId)
+    .eq('status', 'pending')
+    .order('created_at', { ascending: false })
+    .limit(1);
+  return data?.[0] || null;
 }
 
 export async function listPendingApplications() {
@@ -102,7 +114,7 @@ export async function setApplicationStatus(id, status) {
   return data;
 }
 
-// Promote an applicant's user row to an active Administrator (expert).
+// Promote an applicant's user row to an active Block Expert (expert).
 export async function promoteToExpert(telegramId, baseAddress) {
   const { data } = await supabase
     .from('users')
@@ -577,9 +589,9 @@ export async function listOpenBookings() {
 // A builder accepts an open job: assign them, set the travel surcharge priced
 // from THEIR address, and move it to awaiting_payment. Conditional on still
 // being open so two builders can't both win it.
-// Assign an Administrator to an open job. Travel/total are already fixed at
+// Assign a Block Expert to an open job. Travel/total are already fixed at
 // request time (flat fee or own-ride), so this only moves it to awaiting_payment.
-// Conditional on still being open so two Administrators can't both win it.
+// Conditional on still being open so two Block Experts can't both win it.
 export async function acceptOpenBooking(bookingId, expertId) {
   const { data, error } = await supabase
     .from('bookings')
@@ -589,7 +601,7 @@ export async function acceptOpenBooking(bookingId, expertId) {
     .select('*')
     .maybeSingle();
   if (error) throw error;
-  return data; // null if another Administrator took it first
+  return data; // null if another Block Expert took it first
 }
 
 export async function declineBooking(bookingId) {
@@ -602,7 +614,7 @@ export async function declineBooking(bookingId) {
   return data;
 }
 
-// Reassign a booking to a different Administrator (builder cancel → next free).
+// Reassign a booking to a different Block Expert (builder cancel → next free).
 export async function reassignBooking(bookingId, newExpertId) {
   const { data } = await supabase
     .from('bookings')
@@ -668,7 +680,7 @@ export async function listBookedExpertIdsAt(slotStartIso) {
   return (data || []).map((r) => r.expert_id);
 }
 
-// Is this specific Administrator already booked at this hour?
+// Is this specific Block Expert already booked at this hour?
 export async function isExpertBookedAt(expertId, slotStartIso) {
   const { data } = await supabase
     .from('bookings')

@@ -12,15 +12,15 @@ create table if not exists users (
   role          text not null default 'customer'
                   check (role in ('customer', 'expert', 'admin')),
   active        boolean not null default true,
-  address       text,                          -- Administrator base/pickup address
-  rate_cents    integer,                        -- Administrator's per-session rate (null = global default)
+  address       text,                          -- Block Expert base/pickup address
+  rate_cents    integer,                        -- Block Expert's per-session rate (null = global default)
   balance_cents integer not null default 0,     -- prepaid wallet balance (USD cents)
   builder_agreement_at timestamptz,             -- contractor/non-circumvention agreement accepted
   created_at    timestamptz not null default now()
 );
 alter table users enable row level security;
 
--- ── Builder payouts (what we've transferred to each Administrator) ────
+-- ── Builder payouts (what we've transferred to each Block Expert) ────
 create table if not exists payouts (
   id           uuid primary key default gen_random_uuid(),
   expert_id    uuid not null references users(id),
@@ -168,7 +168,7 @@ create table if not exists expert_time_off (
 create index if not exists expert_timeoff_idx on expert_time_off (expert_id);
 alter table expert_time_off enable row level security;
 
--- ── Administrator applications (apply + approval) ────────────────────
+-- ── Block Expert applications (apply + approval) ────────────────────
 create table if not exists admin_applications (
   id           uuid primary key default gen_random_uuid(),
   telegram_id  bigint not null,

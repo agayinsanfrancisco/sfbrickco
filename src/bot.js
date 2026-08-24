@@ -41,7 +41,7 @@ export function createBot() {
   bot
     .setMyCommands([
       { command: 'shop', description: 'Browse & order 3D-printed parts' },
-      { command: 'book', description: 'Book an Administrator (on-site build help)' },
+      { command: 'book', description: 'Book a Block Expert (on-site build help)' },
       { command: 'wallet', description: 'Add funds & check your balance' },
       { command: 'orders', description: 'Your recent orders & bookings' },
       { command: 'help', description: 'How this bot works' },
@@ -57,7 +57,7 @@ export function createBot() {
       '🧱 *SF Brick Company* 🧱\n\n' +
         'Welcome! Here’s what you can do:\n\n' +
         '🛒 *Shop* — custom 3D-printed accessories & upgrades for building-block brands, shipped to you.\n' +
-        '🛠️ *Book an Administrator* — a vetted local builder comes to you in SF to help build, hands-on.\n' +
+        '🛠️ *Book a Block Expert* — a vetted local builder comes to you in SF to help build, hands-on.\n' +
         '💰 *Wallet* — load credit once, then check out in a tap.\n\n' +
         'Pay in crypto or from your wallet. Tap a button below to start.',
       {
@@ -84,7 +84,7 @@ export function createBot() {
     if (payload === 'shop') return shop.startShop(ctx, msg.chat.id);
     if (payload === 'book') return booking.startBooking(ctx, msg.chat.id);
     if (payload === 'wallet') return wallet.showWallet(ctx, msg.chat.id, from.id);
-    if (payload === 'apply') return apply.startApply(ctx, msg.chat.id);
+    if (payload === 'apply') return apply.startApply(ctx, msg.chat.id, msg.from.id);
     await sendMainMenu(msg.chat.id, from.id);
   });
 
@@ -93,7 +93,7 @@ export function createBot() {
   bot.onText(/^\/help/, (msg) => account.showHelp(ctx, msg.chat.id, msg.from.id));
   bot.onText(/^\/orders/, (msg) => account.showMyOrders(ctx, msg.chat.id, msg.from.id));
   bot.onText(/^\/(wallet|balance)/, (msg) => wallet.showWallet(ctx, msg.chat.id, msg.from.id));
-  bot.onText(/^\/apply/, (msg) => apply.startApply(ctx, msg.chat.id));
+  bot.onText(/^\/apply/, (msg) => apply.startApply(ctx, msg.chat.id, msg.from.id));
   bot.onText(/^\/forgetme/, (msg) =>
     bot.sendMessage(
       msg.chat.id,
@@ -296,15 +296,15 @@ export function createBot() {
         const [coin, cents] = sliceAfter(data, 'wal:coin:').split(':');
         await wallet.payDeposit(ctx, chatId, telegramId, coin, Number.parseInt(cents, 10));
       }
-      // Apply to be an Administrator
+      // Apply to be a Block Expert
       else if (data.startsWith('relay:')) {
         const parts = sliceAfter(data, 'relay:').split(':');
         // New: relay:<kind>:<role>:<ref>. Legacy buttons: relay:<role>:<ref> (booking).
         const [kind, role, ref] = parts.length === 3 ? parts : ['b', parts[0], parts[1]];
         await relay.startRelay(ctx, chatId, telegramId, kind, ref, role);
       }
-      // Apply to be an Administrator
-      else if (data === 'apply:start') await apply.startApply(ctx, chatId);
+      // Apply to be a Block Expert
+      else if (data === 'apply:start') await apply.startApply(ctx, chatId, telegramId);
       // Account self-service
       else if (data === 'acct:orders') await account.showMyOrders(ctx, chatId, telegramId);
       else if (data.startsWith('acct:payo:'))

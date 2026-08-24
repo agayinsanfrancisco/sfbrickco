@@ -85,8 +85,8 @@ export async function promptAddExpert(ctx, chatId, telegramId) {
   ctx.sessions.set(chatId, { flow: 'admin', step: 'awaiting_add_expert' });
   await ctx.bot.sendMessage(
     chatId,
-    'Send the Administrator’s *@handle* (Telegram username).\n' +
-      'They’ll become an active Administrator the moment they open the bot and tap /builder.',
+    'Send the Block Expert’s *@handle* (Telegram username).\n' +
+      'They’ll become an active Block Expert the moment they open the bot and tap /builder.',
     { parse_mode: 'Markdown' }
   );
 }
@@ -100,7 +100,7 @@ export async function doAddExpert(ctx, chatId, text) {
   }
   await ctx.bot.sendMessage(
     chatId,
-    `✅ Invited *@${handle}* as an Administrator. They’ll be activated automatically when they open the bot and tap /builder.`,
+    `✅ Invited *@${handle}* as a Block Expert. They’ll be activated automatically when they open the bot and tap /builder.`,
     { parse_mode: 'Markdown' }
   );
 }
@@ -144,7 +144,7 @@ export async function showBookings(ctx, chatId, telegramId) {
       `🕑 ${fmtHourRange(b.slot_start, b.slot_end)}\n📍 ${b.customer_address}\n💵 Service ${usd(
         b.service_fee_cents
       )} (+ travel on accept)`,
-      { reply_markup: { inline_keyboard: [[{ text: '👤 Assign an Administrator', callback_data: `adm:assign:${b.id}` }]] } }
+      { reply_markup: { inline_keyboard: [[{ text: '👤 Assign a Block Expert', callback_data: `adm:assign:${b.id}` }]] } }
     );
   }
   for (const b of awaitingPay) {
@@ -203,7 +203,7 @@ export async function assignExpert(ctx, chatId, telegramId, bookingId, expertId)
       },
     }
   );
-  // Notify the assigned Administrator (they didn't self-accept, so tell them).
+  // Notify the assigned Block Expert (they didn't self-accept, so tell them).
   const builder = await getUserById(expertId);
   if (builder) {
     const travel = accepted.customer_books_ride
@@ -216,13 +216,13 @@ export async function assignExpert(ctx, chatId, telegramId, bookingId, expertId)
           `📍 ${accepted.customer_address}\n${travel} Total ${usd(accepted.total_cents)} — awaiting customer payment.`
       );
     } catch {
-      /* Administrator hasn't opened the bot */
+      /* Block Expert hasn't opened the bot */
     }
   }
   try {
     await ctx.bot.sendMessage(
       accepted.customer_telegram_id,
-      `🎉 An Administrator was assigned for ${fmtHourRange(accepted.slot_start, accepted.slot_end)}!\n` +
+      `🎉 A Block Expert was assigned for ${fmtHourRange(accepted.slot_start, accepted.slot_end)}!\n` +
         `• *Total: ${usd(accepted.total_cents)}*\nTap to pay:`,
       {
         parse_mode: 'Markdown',
@@ -602,12 +602,12 @@ export async function doAddSku(ctx, chatId, text) {
   }
 }
 
-// ── Administrator applications (approval flow) ───────────────────────
+// ── Block Expert applications (approval flow) ───────────────────────
 export async function showApplications(ctx, chatId, telegramId) {
   if (!ensureAdmin(ctx, chatId, telegramId)) return;
   const apps = await listPendingApplications();
   if (!apps.length) {
-    await ctx.bot.sendMessage(chatId, 'No pending Administrator applications.');
+    await ctx.bot.sendMessage(chatId, 'No pending Block Expert applications.');
     return;
   }
   for (const a of apps) {
@@ -641,14 +641,14 @@ export async function approveApplication(ctx, chatId, telegramId, appId) {
   await ctx.bot.sendMessage(
     chatId,
     user
-      ? `✅ Approved *${app.name}* as an Administrator (base ${app.base_address}).`
+      ? `✅ Approved *${app.name}* as a Block Expert (base ${app.base_address}).`
       : `✅ Approved — but ${app.name} must open the bot (/start) once before activation takes effect.`,
     { parse_mode: 'Markdown' }
   );
   try {
     await ctx.bot.sendMessage(
       app.telegram_id,
-      '🎉 *You’re approved as an Administrator!*\n\n' +
+      '🎉 *You’re approved as a Block Expert!*\n\n' +
         'Two quick steps to start getting booked:\n' +
         '① Tap /builder → *🗓️ Availability* and turn on the hours you want to work.\n' +
         '② Confirm your *📍 base address* (used to price travel) and *💲 your rate*.\n\n' +
@@ -671,7 +671,7 @@ export async function rejectApplication(ctx, chatId, telegramId, appId) {
   try {
     await ctx.bot.sendMessage(
       app.telegram_id,
-      'Thanks for applying to be an Administrator — we’re not able to move forward at this time.'
+      'Thanks for applying to be a Block Expert — we’re not able to move forward at this time.'
     );
   } catch {
     /* ignore */
