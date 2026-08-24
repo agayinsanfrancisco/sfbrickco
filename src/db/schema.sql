@@ -129,6 +129,7 @@ create table if not exists inventory (
   name               text not null,
   stock_qty          int not null default 0 check (stock_qty >= 0),
   min_qty            int not null default 1 check (min_qty >= 1), -- minimum per order for this product
+  reorder_floor      int not null default 0,     -- low-stock alert threshold (0 = off)
   reserved_qty       int not null default 0,     -- held by pending orders (#39)
   price_mode         text not null default 'unit_bundle',  -- 'unit_bundle' | 'packs'
   unit_price_cents   int,
@@ -350,3 +351,17 @@ begin
   returning * into r;
   return r;
 end; $$;
+
+
+-- ── Staff action audit log ───────────────────────────────────────────
+create table if not exists staff_actions (
+  id                uuid primary key default gen_random_uuid(),
+  actor_telegram_id bigint,
+  actor_role        text,
+  action            text not null,
+  target            text,
+  detail            text,
+  created_at        timestamptz not null default now()
+);
+create index if not exists staff_actions_created_idx on staff_actions (created_at desc);
+alter table staff_actions enable row level security;

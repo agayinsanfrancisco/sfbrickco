@@ -36,6 +36,8 @@ import { manualSurchargeCents } from './uber.js';
 import { config as cfg } from './config.js';
 import { refreshChatCommands } from './lib/commands.js';
 import { isStaff, ROLE_LABELS } from './lib/roles.js';
+import { logStaffAction } from './lib/notify.js';
+import { listStaffActions } from './supabase.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UI_PATH = path.join(__dirname, 'admin-ui.html');
@@ -180,6 +182,7 @@ export function createWebAdmin(ctx) {
     const app = await setApplicationStatus(req.params.id, 'approved');
     if (!app) return res.status(409).json({ error: 'already handled' });
     const user = await promoteToExpert(app.telegram_id, app.base_address);
+    await logStaffAction(null, 'dashboard', 'application.approve', app.name, app.base_address);
     if (ctx?.bot) await applyApprovalSideEffects(ctx.bot, app, user);
     await notify(
       app.telegram_id,
@@ -214,6 +217,7 @@ export function createWebAdmin(ctx) {
   api.post('/orders/:id/refund', async (req, res) => {
     const row = await markOrderRefunded(req.params.id, req.body?.txid || null);
     if (!row) return res.status(409).json({ error: 'could not mark refunded' });
+    await logStaffAction(null, 'dashboard', 'refund.order', req.params.id, req.body?.txid || null);
     await notify(row.telegram_id, '↩️ Your order has been refunded.');
     res.json({ ok: true });
   });
@@ -223,6 +227,7 @@ export function createWebAdmin(ctx) {
     if (!booking) return res.status(404).json({ error: 'not found' });
     const row = await markBookingRefunded(req.params.id, req.body?.txid || null);
     if (!row) return res.status(409).json({ error: 'could not mark refunded' });
+    await logStaffAction(null, 'dashboard', 'refund.booking', req.params.id, req.body?.txid || null);
     await notify(row.customer_telegram_id, '↩️ Your booking has been refunded.');
     res.json({ ok: true });
   });
@@ -265,6 +270,10 @@ export function createWebAdmin(ctx) {
 
   api.get('/experts', async (_req, res) => {
     res.json(await listExperts({ activeOnly: true }));
+  });
+
+  api.get('/audit', async (_req, res) => {
+    res.json(await listStaffActions(100));
   });
 
   // Log an off-platform payment — full bot-side notification fidelity.
@@ -323,6 +332,7 @@ export function createWebAdmin(ctx) {
     const amount = Number.parseInt(req.body?.amountCents, 10);
     if (!Number.isInteger(amount) || amount <= 0) return res.status(400).json({ error: 'invalid amount' });
     await recordPayout(req.params.expertId, amount, 'dashboard');
+    await logStaffAction(null, 'dashboard', 'payout.record', req.params.expertId, String(amount));
     const u = await getUserById(req.params.expertId);
     try {
       if (u) await ctx?.bot?.sendMessage(u.telegram_id, `💸 You’ve been paid $${(amount / 100).toFixed(2)} — thanks for building with us!`);
@@ -337,6 +347,7 @@ export function createWebAdmin(ctx) {
       return res.status(400).json({ error: 'invalid role' });
     const updated = await setRole(Number(req.params.telegramId), role);
     if (!updated) return res.status(404).json({ error: 'user not found' });
+    await logStaffAction(null, 'dashboard', 'role.set', String(updated.telegram_id), role);
     refreshChatCommands(ctx?.bot, updated.telegram_id, { isExpert: role === 'expert', isStaffMember: isStaff(role) });
     try {
       await ctx?.bot?.sendMessage(updated.telegram_id, `🎖️ Your role is now ${ROLE_LABELS[role]}.`);
@@ -371,6 +382,12 @@ export function createWebAdmin(ctx) {
     if (!Number.isInteger(min) || min < 1) return res.status(400).json({ error: 'minimum must be 1 or more' });
     const { data } = await supabase.from('inventory').update({ min_qty: min }).eq('sku', req.params.sku).select('min_qty').maybeSingle();
     res.json(data ? { ok: true, min: data.min_qty } : { ok: false });
+  });
+  api.post('/inventory/:sku/floor', async (req, res) => {
+    const floor = Number.parseInt(req.body?.floor, 10);
+    if (!Number.isInteger(floor) || floor < 0) return res.status(400).json({ error: 'invalid floor' });
+    const { data } = await supabase.from('inventory').update({ reorder_floor: floor }).eq('sku', req.params.sku).select('reorder_floor').maybeSingle();
+    res.json(data ? { ok: true, floor: data.reorder_floor } : { ok: false });
   });
 
   router.use('/admin/api', api);

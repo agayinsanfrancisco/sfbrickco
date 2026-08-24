@@ -1,5 +1,7 @@
 import { config, isAdminId } from '../config.js';
 import { issueTermsToken, hasViewedTerms } from '../lib/termsgate.js';
+import { notifyStaff } from '../lib/notify.js';
+import { getIntSetting } from '../lib/settings.js';
 import * as crypto from '../crypto.js';
 import { usd, fmtHourRange, shortRef, orderItemsSummary, mdEscape } from '../lib/format.js';
 import { orderTotalCents, discountFor } from '../lib/money.js';
@@ -299,17 +301,9 @@ async function notifyAdminsToConfirm(ctx, { kind, ref, address, coin, amountCent
   const note = auto
     ? 'This should confirm automatically once on-chain; the button is a backup.'
     : 'Verify on the explorer, then confirm:';
-  for (const adminId of config.adminIds) {
-    try {
-      await ctx.bot.sendMessage(
-        adminId,
-        `${head}\n${detail}\nExpect *${cryptoAmount} ${c.ticker}* (≈ ${usd(amountCents)}).\n${note}`,
-        { parse_mode: 'Markdown', reply_markup: { inline_keyboard: rows } }
-      );
-    } catch {
-      /* admin hasn't opened the bot */
-    }
-  }
+  await notifyStaff(ctx, 'manage_orders',
+    `${head}\n${detail}\nExpect *${cryptoAmount} ${c.ticker}* (≈ ${usd(amountCents)}).\n${note}`,
+    { parse_mode: 'Markdown', reply_markup: { inline_keyboard: rows } });
 }
 
 export async function payOrderCrypto(ctx, chatId, telegramId, coin, orderId, { refresh = false } = {}) {
@@ -457,16 +451,8 @@ export async function payBookingCrypto(ctx, chatId, telegramId, coin, bookingId,
 
 export async function customerSent(ctx, chatId, kind, ref) {
   await ctx.bot.sendMessage(chatId, '🙏 Thanks! We’ll verify the payment and confirm shortly.');
-  for (const adminId of config.adminIds) {
-    try {
-      await ctx.bot.sendMessage(
-        adminId,
-        `🔔 Customer reports they sent payment (${kind === 'o' ? 'order' : 'booking'} ${ref}). Verify + confirm.`
-      );
-    } catch {
-      /* ignore */
-    }
-  }
+  await notifyStaff(ctx, 'manage_orders',
+    `🔔 Customer reports they sent payment (${kind === 'o' ? 'order' : 'booking'} ${ref}). Verify + confirm.`);
 }
 
 // ── Pay from prepaid wallet balance ──────────────────────────────────
@@ -542,15 +528,14 @@ export async function confirmOrder(ctx, order, { auto = false } = {}) {
     const remaining = await decrementStock(line.sku, line.qty);
     if (remaining && remaining.stock_qty === 0) {
       await setProductActive(line.sku, false);
-      for (const adminId of config.adminIds) {
-        try {
-          await ctx.bot.sendMessage(adminId, `⚠️ ${line.sku} is now *sold out* and has been hidden from the shop. Restock via the inventory menu.`, {
-            parse_mode: 'Markdown',
-          });
-        } catch {
-          /* ignore */
-        }
-      }
+      await notifyStaff(ctx, 'manage_orders',
+        `⚠️ *${remaining.name || line.sku}* is now *sold out* and has been hidden from the shop. Restock via the dashboard or /owner.`,
+        { parse_mode: 'Markdown' });
+    } else if (remaining && remaining.reorder_floor > 0 && remaining.stock_qty <= remaining.reorder_floor) {
+      // Low-stock reorder floor: warn once as stock crosses the threshold.
+      await notifyStaff(ctx, 'manage_orders',
+        `📉 *Low stock:* ${remaining.name || line.sku} down to *${remaining.stock_qty}* (reorder at ${remaining.reorder_floor}).`,
+        { parse_mode: 'Markdown' });
     }
   }
   try {
@@ -571,16 +556,10 @@ export async function confirmOrder(ctx, order, { auto = false } = {}) {
     `📞 ${mdEscape(order.contact_phone) || '—'}${order.contact_handle ? ` (@${mdEscape(order.contact_handle)})` : ''}` +
     `${order.notes ? `\n📝 ${mdEscape(order.notes)}` : ''}\n` +
     `Delivery fee ${usd(order.delivery_fee_cents)} · paid ${auto ? 'auto/on-chain' : 'manual'}`;
-  for (const adminId of config.adminIds) {
-    try {
-      await ctx.bot.sendMessage(adminId, detail, {
-        parse_mode: 'Markdown',
-        reply_markup: { inline_keyboard: [[{ text: '🚚 Accept & dispatch', callback_data: `pm:disp:${order.id}` }]] },
-      });
-    } catch {
-      /* ignore */
-    }
-  }
+  await notifyStaff(ctx, 'manage_orders', detail, {
+    parse_mode: 'Markdown',
+    reply_markup: { inline_keyboard: [[{ text: '🚚 Accept & dispatch', callback_data: `pm:disp:${order.id}` }]] },
+  });
   return true;
 }
 
@@ -625,13 +604,7 @@ export async function confirmBooking(ctx, booking, { auto = false } = {}) {
       }
     }
   }
-  for (const adminId of config.adminIds) {
-    try {
-      await ctx.bot.sendMessage(adminId, `✅ Booking ${booking.id} paid (${auto ? 'auto' : 'manual'}) & confirmed.`);
-    } catch {
-      /* ignore */
-    }
-  }
+  await notifyStaff(ctx, 'manage_experts', `✅ Booking ${shortRef(booking.id)} paid (${auto ? 'auto' : 'manual'}) & confirmed.`);
   return true;
 }
 

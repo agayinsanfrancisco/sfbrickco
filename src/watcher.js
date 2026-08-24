@@ -25,6 +25,9 @@ const WINDOW_MS = 24 * 60 * 60 * 1000;
 // Addresses we've already alerted admins about for underpayment, so we don't
 // re-alert every tick. In-memory: resets on restart (acceptable for an alert).
 const underpaidAlerted = new Set();
+// Items we've already told the customer "payment detected, confirming…" about,
+// so the mempool acknowledgement fires once, not every 60s tick.
+const mempoolAcked = new Set();
 
 function meetsThreshold(confirmedSats, cryptoAmount) {
   return confirmedSats >= crypto.toSats(cryptoAmount) * config.crypto.fundedTolerance;
@@ -74,15 +77,33 @@ async function alertUnderpaid(ctx, kind, item, confirmedSats) {
 
 async function settle(ctx, kind, item, confirm, recordTx) {
   if (!item.pay_coin || !item.pay_address || !item.crypto_amount) return;
-  let confirmedSats;
+  let confirmedSats, mempoolSats;
   try {
-    ({ confirmed: confirmedSats } = await crypto.getConfirmedReceived(item.pay_coin, item.pay_address));
+    ({ confirmed: confirmedSats, mempool: mempoolSats } = await crypto.getConfirmedReceived(item.pay_coin, item.pay_address));
   } catch (err) {
     // Explorer hiccup / timeout — log and retry next tick (don't block others).
     console.error(`watch ${kind} ${item.id} (${item.pay_coin}):`, err.message);
     return;
   }
-  if (confirmedSats <= 0) return;
+  const key = `${kind}:${item.id}`;
+  if (confirmedSats <= 0) {
+    // Seen in the mempool but not yet in a block — tell the customer we've got
+    // it and are waiting on confirmation, so they don't sit in silence.
+    if ((mempoolSats || 0) > 0 && !mempoolAcked.has(key)) {
+      mempoolAcked.add(key);
+      const customerId = kind === 'order' ? item.telegram_id : item.customer_telegram_id;
+      try {
+        await ctx.bot.sendMessage(
+          customerId,
+          '⏳ *Payment detected!* We can see your transaction on the network and are waiting for it to confirm (usually one block — a few minutes for LTC, up to ~30–60 min for BTC). We’ll message you the moment it clears — no need to send anything else.',
+          { parse_mode: 'Markdown' }
+        );
+      } catch {
+        /* customer hasn't opened the bot */
+      }
+    }
+    return;
+  }
   if (!meetsThreshold(confirmedSats, item.crypto_amount)) {
     await alertUnderpaid(ctx, kind, item, confirmedSats);
     return;
@@ -91,7 +112,37 @@ async function settle(ctx, kind, item, confirm, recordTx) {
   if (ok) {
     const tx = await crypto.getFundingTx(item.pay_coin, item.pay_address);
     if (tx) await recordTx(item.id, tx);
-    underpaidAlerted.delete(`${kind}:${item.id}`);
+    underpaidAlerted.delete(key);
+    mempoolAcked.delete(key);
+    // Overpayment → credit the excess to the customer's wallet (not silently
+    // kept). Only when the surplus is worth more than a cent.
+    try {
+      const requiredSats = crypto.toSats(item.crypto_amount);
+      const surplusSats = confirmedSats - requiredSats;
+      if (surplusSats > 0) {
+        const surplus = (surplusSats / 1e8).toFixed(8);
+        const surplusCents = await crypto.valueUsdCents(item.pay_coin, surplus);
+        if (surplusCents >= 1) {
+          const customerId = kind === 'order' ? item.telegram_id : item.customer_telegram_id;
+          const balance = await creditBalance(customerId, surplusCents, {
+            kind: 'adjustment',
+            refType: kind,
+            refId: item.id,
+          });
+          try {
+            await ctx.bot.sendMessage(
+              customerId,
+              `💰 You sent a little extra — we credited *${usd(surplusCents)}* to your wallet. Balance: *${usd(balance)}*.`,
+              { parse_mode: 'Markdown' }
+            );
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+    } catch (err) {
+      console.error(`overpay credit ${key}:`, err.message);
+    }
   }
 }
 
