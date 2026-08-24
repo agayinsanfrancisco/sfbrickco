@@ -62,9 +62,26 @@ export async function receivePhone(ctx, chatId, phone) {
   ctx.sessions.set(chatId, { ...s, step: 'hours', data: { ...s.data, phone: String(phone).trim() } });
   await ctx.bot.sendMessage(
     chatId,
-    'What *hours* would you like to operate? (e.g. “Mon–Fri 9am–6pm, weekends flexible”)',
-    { parse_mode: 'Markdown', reply_markup: { force_reply: true } }
+    'What *hours* would you like to operate? Tap one (you can fine-tune later), or type your own:',
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🌤️ Weekdays 9am–5pm', callback_data: 'apply:hrs:Weekdays 9am-5pm' }],
+          [{ text: '🌙 Evenings 5–9pm every day', callback_data: 'apply:hrs:Every day 5pm-9pm' }],
+          [{ text: '🎉 Weekends 9am–9pm', callback_data: 'apply:hrs:Weekends 9am-9pm' }],
+          [{ text: '⚡ Every day 9am–9pm', callback_data: 'apply:hrs:Every day 9am-9pm' }],
+        ],
+      },
+    }
   );
+}
+
+// Preset hours button tapped during the application.
+export async function chooseHours(ctx, chatId, label) {
+  const s = ctx.sessions.get(chatId);
+  if (s?.flow !== 'apply' || s.step !== 'hours') return;
+  await receiveHours(ctx, chatId, label);
 }
 
 export async function receiveHours(ctx, chatId, hours) {
