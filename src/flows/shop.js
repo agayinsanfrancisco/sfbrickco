@@ -80,11 +80,16 @@ export async function chooseProduct(ctx, chatId, sku) {
   }
   const s = ctx.sessions.get(chatId) || {};
   if (p.price_mode === 'packs') {
-    const rows = packOptions(p).map((pk) => [
-      { text: `${pk.qty} for ${usd(pk.cents)}`, callback_data: `shop:pack:${sku}:${pk.qty}` },
-    ]);
+    // Hide pack sizes below the per-order minimum so customers can't pick one
+    // the checkout gate would only reject.
+    const min = p.min_qty || 1;
+    const rows = packOptions(p)
+      .filter((pk) => pk.qty >= min)
+      .map((pk) => [
+        { text: `${pk.qty} for ${usd(pk.cents)}`, callback_data: `shop:pack:${sku}:${pk.qty}` },
+      ]);
     ctx.sessions.set(chatId, { ...s, flow: 'shop', cart: s.cart || [] });
-    await ctx.bot.sendMessage(chatId, `*${p.name}*\nChoose a pack:`, {
+    await ctx.bot.sendMessage(chatId, `*${p.name}*${(p.min_qty || 1) > 1 ? `\n_Minimum ${p.min_qty} per order._` : ''}\nChoose a pack:`, {
       parse_mode: 'Markdown',
       reply_markup: { inline_keyboard: rows },
     });
@@ -94,8 +99,8 @@ export async function chooseProduct(ctx, chatId, sku) {
       chatId,
       `*${p.name}*\n• ${usd(p.unit_price_cents)} each\n• ${p.bundle_qty} for ${usd(
         p.bundle_price_cents
-      )}\n\nHow many?`,
-      { parse_mode: 'Markdown', ...qtyKeyboard() }
+      )}${(p.min_qty || 1) > 1 ? `\n• *Minimum ${p.min_qty} per order*` : ''}\n\nHow many?`,
+      { parse_mode: 'Markdown', ...qtyKeyboard(p.min_qty || 1) }
     );
   }
 }
@@ -144,6 +149,15 @@ async function addToCart(ctx, chatId, sku, qty) {
   const lineCents = priceForProduct(p, qty);
   if (lineCents == null) {
     await ctx.bot.sendMessage(chatId, 'That quantity isn’t available for this product.');
+    return;
+  }
+  const min = p.min_qty || 1;
+  if (already + qty < min) {
+    await ctx.bot.sendMessage(
+      chatId,
+      `ℹ️ *${p.name}* has a *${min}-per-order minimum*. Please choose at least ${min}${already ? ` (you have ${already} so far)` : ''}.`,
+      { parse_mode: 'Markdown' }
+    );
     return;
   }
   cart.push({ sku, name: p.name, qty, line_cents: lineCents });
@@ -211,6 +225,23 @@ export async function checkout(ctx, chatId) {
   const cart = getCart(ctx, chatId);
   if (!cart.length) {
     await ctx.bot.sendMessage(chatId, 'Your cart is empty. Tap /shop to add items.');
+    return;
+  }
+  // Per-product minimum-order-quantity gate (sums stacked line items).
+  const totals = new Map();
+  for (const i of cart) totals.set(i.sku, (totals.get(i.sku) || 0) + i.qty);
+  const shortfalls = [];
+  for (const [sku, total] of totals) {
+    const p = await getProduct(sku);
+    const min = p?.min_qty || 1;
+    if (total < min) shortfalls.push(`• *${p?.name || sku}*: minimum ${min}, you have ${total}`);
+  }
+  if (shortfalls.length) {
+    await ctx.bot.sendMessage(
+      chatId,
+      `🛒 Before checkout, please meet the per-order minimums:\n${shortfalls.join('\n')}\n\nTap /shop to add more.`,
+      { parse_mode: 'Markdown' }
+    );
     return;
   }
   const last = await lastDeliveryAddress(chatId);

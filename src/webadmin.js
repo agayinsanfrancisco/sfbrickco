@@ -366,6 +366,12 @@ export function createWebAdmin(ctx) {
     const updated = await setProductPrice(req.params.sku, { unitPriceCents: Math.round(dollars * 100) });
     res.json(updated ? { ok: true } : { ok: false });
   });
+  api.post('/inventory/:sku/min', async (req, res) => {
+    const min = Number.parseInt(req.body?.min, 10);
+    if (!Number.isInteger(min) || min < 1) return res.status(400).json({ error: 'minimum must be 1 or more' });
+    const { data } = await supabase.from('inventory').update({ min_qty: min }).eq('sku', req.params.sku).select('min_qty').maybeSingle();
+    res.json(data ? { ok: true, min: data.min_qty } : { ok: false });
+  });
 
   router.use('/admin/api', api);
 
