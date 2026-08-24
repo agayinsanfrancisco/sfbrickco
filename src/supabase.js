@@ -70,7 +70,7 @@ export async function applyBuilderInvite(user) {
   return updated || user;
 }
 
-// ── Administrator applications (apply + approval flow) ───────────────
+// ── Block Expert applications (apply + approval flow) ───────────────
 export async function createApplication({ telegramId, username, name, hours, rate, baseAddress }) {
   const { data, error } = await supabase
     .from('admin_applications')
@@ -79,6 +79,18 @@ export async function createApplication({ telegramId, username, name, hours, rat
     .single();
   if (error) throw error;
   return data;
+}
+
+// A user's own pending application, if any — used to block duplicate /apply.
+export async function getPendingApplication(telegramId) {
+  const { data } = await supabase
+    .from('admin_applications')
+    .select('*')
+    .eq('telegram_id', telegramId)
+    .eq('status', 'pending')
+    .order('created_at', { ascending: false })
+    .limit(1);
+  return data?.[0] || null;
 }
 
 export async function listPendingApplications() {
@@ -102,7 +114,7 @@ export async function setApplicationStatus(id, status) {
   return data;
 }
 
-// Promote an applicant's user row to an active Administrator (expert).
+// Promote an applicant's user row to an active Block Expert (expert).
 export async function promoteToExpert(telegramId, baseAddress) {
   const { data } = await supabase
     .from('users')
@@ -577,9 +589,9 @@ export async function listOpenBookings() {
 // A builder accepts an open job: assign them, set the travel surcharge priced
 // from THEIR address, and move it to awaiting_payment. Conditional on still
 // being open so two builders can't both win it.
-// Assign an Administrator to an open job. Travel/total are already fixed at
+// Assign a Block Expert to an open job. Travel/total are already fixed at
 // request time (flat fee or own-ride), so this only moves it to awaiting_payment.
-// Conditional on still being open so two Administrators can't both win it.
+// Conditional on still being open so two Block Experts can't both win it.
 export async function acceptOpenBooking(bookingId, expertId) {
   const { data, error } = await supabase
     .from('bookings')
@@ -589,7 +601,7 @@ export async function acceptOpenBooking(bookingId, expertId) {
     .select('*')
     .maybeSingle();
   if (error) throw error;
-  return data; // null if another Administrator took it first
+  return data; // null if another Block Expert took it first
 }
 
 export async function declineBooking(bookingId) {
@@ -602,7 +614,7 @@ export async function declineBooking(bookingId) {
   return data;
 }
 
-// Reassign a booking to a different Administrator (builder cancel → next free).
+// Reassign a booking to a different Block Expert (builder cancel → next free).
 export async function reassignBooking(bookingId, newExpertId) {
   const { data } = await supabase
     .from('bookings')
@@ -668,7 +680,7 @@ export async function listBookedExpertIdsAt(slotStartIso) {
   return (data || []).map((r) => r.expert_id);
 }
 
-// Is this specific Administrator already booked at this hour?
+// Is this specific Block Expert already booked at this hour?
 export async function isExpertBookedAt(expertId, slotStartIso) {
   const { data } = await supabase
     .from('bookings')
@@ -827,6 +839,134 @@ export async function repeatCustomers(minBookings = 2) {
     r.name = u?.full_name || (u?.username ? `@${u.username}` : `id ${r.telegram_id}`);
   }
   return rows;
+}
+
+// ── Combined payment: link an upsell parts order to a booking ─────────
+export async function linkOrderToBooking(bookingId, orderId) {
+  const { data } = await supabase
+    .from('bookings')
+    .update({ linked_order_id: orderId })
+    .eq('id', bookingId)
+    .eq('payment_status', 'unpaid')
+    .select('*')
+    .maybeSingle();
+  return data;
+}
+
+export async function bookingByLinkedOrder(orderId) {
+  const { data } = await supabase
+    .from('bookings')
+    .select('*')
+    .eq('linked_order_id', orderId)
+    .eq('payment_status', 'unpaid')
+    .maybeSingle();
+  return data;
+}
+
+// ── Reschedule (customer moves a booking to a new free hour) ─────────
+export async function rescheduleBooking(bookingId, slotStartIso, slotEndIso) {
+  const { data } = await supabase
+    .from('bookings')
+    .update({ slot_start: slotStartIso, slot_end: slotEndIso, reminded: false })
+    .eq('id', bookingId)
+    .in('status', ['awaiting_payment', 'accepted'])
+    .select('*')
+    .maybeSingle();
+  return data;
+}
+
+// ── Job-done confirmation ────────────────────────────────────────────
+export async function markBookingCompleted(bookingId) {
+  const { data } = await supabase
+    .from('bookings')
+    .update({ status: 'completed' })
+    .eq('id', bookingId)
+    .eq('payment_status', 'paid')
+    .in('status', ['accepted'])
+    .select('*')
+    .maybeSingle();
+  return data;
+}
+
+// ── Builder payouts ──────────────────────────────────────────────────
+// Earned basis: every PAID booking's service fee (the builder's gross). The
+// flow layer applies the platform-fee % to get net. Payouts are what we've
+// actually transferred.
+export async function builderPayoutData() {
+  const [{ data: earned }, { data: paid }] = await Promise.all([
+    supabase
+      .from('bookings')
+      .select('expert_id, service_fee_cents')
+      .eq('payment_status', 'paid')
+      .not('expert_id', 'is', null),
+    supabase.from('payouts').select('expert_id, amount_cents'),
+  ]);
+  return { earned: earned || [], paid: paid || [] };
+}
+
+export async function recordPayout(expertId, amountCents, note = null) {
+  const { data, error } = await supabase
+    .from('payouts')
+    .insert({ expert_id: expertId, amount_cents: amountCents, note })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+// One builder's totals (for their portal).
+export async function builderEarnings(expertId) {
+  const [{ data: earned }, { data: paid }] = await Promise.all([
+    supabase
+      .from('bookings')
+      .select('service_fee_cents')
+      .eq('expert_id', expertId)
+      .eq('payment_status', 'paid'),
+    supabase.from('payouts').select('amount_cents').eq('expert_id', expertId),
+  ]);
+  return {
+    grossCents: (earned || []).reduce((s, b) => s + (b.service_fee_cents || 0), 0),
+    paidOutCents: (paid || []).reduce((s, p) => s + (p.amount_cents || 0), 0),
+    jobs: (earned || []).length,
+  };
+}
+
+// ── Builder agreement (non-circumvention / contractor terms) ─────────
+export async function setBuilderAgreement(telegramId) {
+  const { data } = await supabase
+    .from('users')
+    .update({ builder_agreement_at: new Date().toISOString() })
+    .eq('telegram_id', telegramId)
+    .select('*')
+    .maybeSingle();
+  return data;
+}
+
+// ── Demo-data teardown (mirror of src/db/seed_teardown.sql) ───────────
+export async function removeDemoData() {
+  const DEMO_TIDS = [900000001, 900000002, 900000003];
+  const { data: demoUsers } = await supabase.from('users').select('id').in('telegram_id', DEMO_TIDS);
+  const ids = (demoUsers || []).map((u) => u.id);
+  if (ids.length) {
+    await supabase.from('reviews').delete().in('expert_id', ids);
+    await supabase.from('bookings').delete().in('expert_id', ids);
+    await supabase.from('expert_availability').delete().in('expert_id', ids);
+    await supabase.from('expert_time_off').delete().in('expert_id', ids);
+    await supabase.from('payouts').delete().in('expert_id', ids);
+  }
+  await supabase.from('ledger').delete().eq('ref_type', 'seed');
+  await supabase.from('users').update({ balance_cents: 0 }).in('telegram_id', [8524453004, 7200676639]);
+  await supabase.from('users').delete().in('telegram_id', DEMO_TIDS);
+  return ids.length;
+}
+
+// ── CSV export (owner bookkeeping) ───────────────────────────────────
+export async function exportRows() {
+  const [{ data: orders }, { data: bookings }] = await Promise.all([
+    supabase.from('orders').select('*').order('created_at', { ascending: false }).limit(1000),
+    supabase.from('bookings').select('*').order('created_at', { ascending: false }).limit(1000),
+  ]);
+  return { orders: orders || [], bookings: bookings || [] };
 }
 
 // ── Inventory ────────────────────────────────────────────────────────

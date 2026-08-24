@@ -9,6 +9,8 @@ import {
   isExpertBookedAt,
   isExpertTimeOff,
   getUserById,
+  getBooking,
+  rescheduleBooking,
 } from '../supabase.js';
 import { upcomingDays, hourlySlots, isCovered } from '../lib/slots.js';
 import { daysKeyboard, hoursKeyboard } from '../lib/keyboards.js';
@@ -17,13 +19,13 @@ import { getIntSetting, getBoolSetting } from '../lib/settings.js';
 import { presentWaiver } from './payments.js';
 
 // Service fee: admin-editable setting, falling back to the env-derived default.
-// Used as the price floor when an Administrator hasn't set their own rate.
+// Used as the price floor when a Block Expert hasn't set their own rate.
 export function serviceFeeCents() {
   return getIntSetting('service_fee_cents', config.pricing.serviceFeeCents);
 }
 
 function adminName(u) {
-  return u.full_name || u.username || 'Administrator';
+  return u.full_name || u.username || 'Block Expert';
 }
 
 export async function startBooking(ctx, chatId) {
@@ -35,10 +37,10 @@ export async function startBooking(ctx, chatId) {
   ctx.sessions.set(chatId, { flow: 'book', step: 'choosing_travel' });
   await ctx.bot.sendMessage(
     chatId,
-    `🛠️ *Book an Administrator*\n\n` +
-      `An Administrator is a vetted local builder who comes to you for a *1-hour on-site session* to help build, hands-on.\n\n` +
-      `Here’s the flow: ① how they travel → ② day → ③ time → ④ pick your Administrator → ⑤ your address → ⑥ pay.\n\n` +
-      `First — the Administrator needs a ride to you. How do you want to handle it?`,
+    `🛠️ *Book a Block Expert*\n\n` +
+      `A Block Expert is a vetted local builder who comes to you for a *1-hour on-site session* to help build, hands-on.\n\n` +
+      `Here’s the flow: ① how they travel → ② day → ③ time → ④ pick your Block Expert → ⑤ your address → ⑥ pay.\n\n` +
+      `First — the Block Expert needs a ride to you. How do you want to handle it?`,
     {
       parse_mode: 'Markdown',
       reply_markup: {
@@ -63,7 +65,7 @@ export async function chooseTravel(ctx, chatId, ownRide) {
 
 export async function pickDay(ctx, chatId, dateKey) {
   const slots = hourlySlots(dateKey);
-  // Only offer hours some active Administrator is available for. With no
+  // Only offer hours some active Block Expert is available for. With no
   // schedules set anywhere, isCovered returns true so all slots show.
   const avail = await listActiveAvailability();
   const open = slots.filter((s) => isCovered(avail, s.startIso));
@@ -71,12 +73,12 @@ export async function pickDay(ctx, chatId, dateKey) {
     chatId,
     open.length
       ? 'Pick a 1-hour start time (Pacific):'
-      : 'No Administrators are available that day — try another.',
+      : 'No Block Experts are available that day — try another.',
     hoursKeyboard(open)
   );
 }
 
-// After picking the hour, show the Administrators available for it so the
+// After picking the hour, show the Block Experts available for it so the
 // customer can choose one (book directly).
 export async function pickHour(ctx, chatId, startIso) {
   const endIso = new Date(new Date(startIso).getTime() + 60 * 60 * 1000).toISOString();
@@ -94,7 +96,7 @@ export async function pickHour(ctx, chatId, startIso) {
     available.push({ id: e.id, name: adminName(e), rate: e.rate_cents ?? floor, rating });
   }
   if (!available.length) {
-    await ctx.bot.sendMessage(chatId, 'No Administrators are free at that hour — tap /book to pick another time.');
+    await ctx.bot.sendMessage(chatId, 'No Block Experts are free at that hour — tap /book to pick another time.');
     return;
   }
   ctx.sessions.set(chatId, { ...s, flow: 'book', step: 'choosing_admin', data: { startIso, endIso } });
@@ -104,7 +106,7 @@ export async function pickHour(ctx, chatId, startIso) {
       callback_data: `book:admin:${a.id}`,
     },
   ]);
-  await ctx.bot.sendMessage(chatId, `Available for ${fmtHourRange(startIso, endIso)} — pick your Administrator:`, {
+  await ctx.bot.sendMessage(chatId, `Available for ${fmtHourRange(startIso, endIso)} — pick your Block Expert:`, {
     reply_markup: { inline_keyboard: rows },
   });
 }
@@ -114,15 +116,15 @@ export async function chooseAdmin(ctx, chatId, expertId) {
   if (s?.flow !== 'book' || s.step !== 'choosing_admin' || !s.data?.startIso) return;
   const admin = await getUserById(expertId);
   if (!admin || admin.role !== 'expert' || !admin.active) {
-    await ctx.bot.sendMessage(chatId, 'That Administrator is no longer available — tap /book to try again.');
+    await ctx.bot.sendMessage(chatId, 'That Block Expert is no longer available — tap /book to try again.');
     return;
   }
   if (await isExpertBookedAt(expertId, s.data.startIso)) {
-    await ctx.bot.sendMessage(chatId, 'That Administrator was just booked for that hour — tap /book to pick another time.');
+    await ctx.bot.sendMessage(chatId, 'That Block Expert was just booked for that hour — tap /book to pick another time.');
     return;
   }
   if (await isExpertTimeOff(expertId, s.data.startIso)) {
-    await ctx.bot.sendMessage(chatId, 'That Administrator just blocked off that hour — tap /book to pick another time.');
+    await ctx.bot.sendMessage(chatId, 'That Block Expert just blocked off that hour — tap /book to pick another time.');
     return;
   }
   const rate = admin.rate_cents ?? (await serviceFeeCents());
@@ -193,7 +195,7 @@ export async function confirmRequest(ctx, chatId, telegramId) {
   ctx.sessions.delete(chatId);
 
   if (await isExpertBookedAt(expertId, startIso)) {
-    await ctx.bot.sendMessage(chatId, 'That Administrator was just booked for that hour — tap /book to pick another.');
+    await ctx.bot.sendMessage(chatId, 'That Block Expert was just booked for that hour — tap /book to pick another.');
     return;
   }
 
@@ -208,12 +210,12 @@ export async function confirmRequest(ctx, chatId, telegramId) {
     surcharge_cents: surcharge,
     surcharge_source: ownRide ? 'customer_ride' : 'manual',
     total_cents: total,
-    status: 'awaiting_payment', // Administrator chosen directly — no open-job step
+    status: 'awaiting_payment', // Block Expert chosen directly — no open-job step
     expert_id: expertId,
     customer_books_ride: ownRide,
   });
 
-  // Notify the chosen Administrator they've been booked (pending payment).
+  // Notify the chosen Block Expert they've been booked (pending payment).
   const admin = await getUserById(expertId);
   if (admin) {
     const travel = ownRide ? 'Customer books your ride.' : `${usd(surcharge)} travel included.`;
@@ -224,7 +226,7 @@ export async function confirmRequest(ctx, chatId, telegramId) {
           `Total ${usd(total)} — pending the customer’s payment.`
       );
     } catch {
-      /* Administrator hasn't opened the bot */
+      /* Block Expert hasn't opened the bot */
     }
   }
 
@@ -254,4 +256,101 @@ export async function payBooking(ctx, chatId, _telegramId, bookingId) {
 export function cancelBooking(ctx, chatId) {
   ctx.sessions.delete(chatId);
   return ctx.bot.sendMessage(chatId, 'Booking cancelled. Tap /start anytime.');
+}
+
+// ── Reschedule (customer moves an upcoming booking) ──────────────────
+// Same Block Expert, new hour they're actually free for. Payment carries over.
+
+async function expertFreeAt(expertId, startIso) {
+  if (await isExpertBookedAt(expertId, startIso)) return false;
+  if (await isExpertTimeOff(expertId, startIso)) return false;
+  const windows = await getExpertAvailability(expertId);
+  if (windows.length && !isCovered(windows, startIso)) return false;
+  return true;
+}
+
+export async function startReschedule(ctx, chatId, telegramId, bookingId) {
+  const booking = await getBooking(bookingId);
+  if (
+    !booking ||
+    booking.customer_telegram_id !== telegramId ||
+    !booking.expert_id ||
+    !['awaiting_payment', 'accepted'].includes(booking.status)
+  ) {
+    await ctx.bot.sendMessage(chatId, 'That booking can’t be rescheduled.');
+    return;
+  }
+  // Collect the free hours for THIS Block Expert across the bookable window.
+  const options = [];
+  for (const day of upcomingDays(2)) {
+    for (const slot of hourlySlots(day.dateKey)) {
+      if (slot.startIso === booking.slot_start) continue;
+      if (await expertFreeAt(booking.expert_id, slot.startIso)) {
+        options.push({ ...slot, dayLabel: day.label });
+      }
+    }
+  }
+  if (!options.length) {
+    await ctx.bot.sendMessage(
+      chatId,
+      'No other free hours for your Block Expert in the next 12 hours — try again later, or cancel and rebook.'
+    );
+    return;
+  }
+  ctx.sessions.set(chatId, { flow: 'book', step: 'resched', bookingId });
+  const rows = [];
+  for (let i = 0; i < options.length; i += 2) {
+    rows.push(
+      options.slice(i, i + 2).map((s) => ({
+        text: `${s.dayLabel} ${s.label}`,
+        callback_data: `book:rs:${s.startIso}`,
+      }))
+    );
+  }
+  await ctx.bot.sendMessage(
+    chatId,
+    `📅 *Reschedule* — currently ${fmtHourRange(booking.slot_start, booking.slot_end)}.\nPick a new start time:`,
+    { parse_mode: 'Markdown', reply_markup: { inline_keyboard: rows } }
+  );
+}
+
+export async function doReschedule(ctx, chatId, telegramId, startIso) {
+  const s = ctx.sessions.get(chatId);
+  if (s?.step !== 'resched' || !s.bookingId) return;
+  ctx.sessions.delete(chatId);
+  const booking = await getBooking(s.bookingId);
+  if (!booking || booking.customer_telegram_id !== telegramId) return;
+  // Re-validate at tap time (someone may have grabbed the hour meanwhile).
+  if (!(await expertFreeAt(booking.expert_id, startIso))) {
+    await ctx.bot.sendMessage(chatId, 'That hour was just taken — tap Reschedule again to pick another.');
+    return;
+  }
+  const endIso = new Date(new Date(startIso).getTime() + 60 * 60 * 1000).toISOString();
+  const updated = await rescheduleBooking(s.bookingId, startIso, endIso);
+  if (!updated) {
+    await ctx.bot.sendMessage(chatId, 'That booking can’t be rescheduled anymore.');
+    return;
+  }
+  await ctx.bot.sendMessage(
+    chatId,
+    `✅ Rescheduled to *${fmtHourRange(updated.slot_start, updated.slot_end)}* — same Block Expert${
+      updated.payment_status === 'paid' ? ', already paid' : ''
+    }.`,
+    { parse_mode: 'Markdown' }
+  );
+  // Tell the Block Expert their job moved.
+  const admin = await getUserById(updated.expert_id);
+  if (admin) {
+    try {
+      await ctx.bot.sendMessage(
+        admin.telegram_id,
+        `📅 Schedule change: your job at ${updated.customer_address} moved to ${fmtHourRange(
+          updated.slot_start,
+          updated.slot_end
+        )}.`
+      );
+    } catch {
+      /* ignore */
+    }
+  }
 }

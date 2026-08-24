@@ -10,6 +10,7 @@ import {
   listBookingsByCustomer,
   getOrder,
   getBooking,
+  removeDemoData,
 } from '../supabase.js';
 import { confirmOrder, confirmBooking } from './payments.js';
 import { usd, shortRef, fmtHourRange, orderItemsSummary } from '../lib/format.js';
@@ -54,6 +55,7 @@ export async function showTestMode(ctx, chatId, telegramId) {
           [{ text: '⚙️ View as Owner', callback_data: 'adm:test:owner' }],
           [{ text: '💳 Simulate a payment', callback_data: 'adm:test:pay' }],
           [{ text: '💰 Top up test wallet +$100', callback_data: 'adm:test:wallet' }],
+          [{ text: '🧹 Remove demo data (before launch)', callback_data: 'adm:test:clean' }],
           [{ text: '⬅️ Back to panel', callback_data: 'adm:menu' }],
         ],
       },
@@ -64,7 +66,7 @@ export async function showTestMode(ctx, chatId, telegramId) {
 export async function setMode(ctx, chatId, telegramId, mode) {
   if (!guard(ctx, chatId, telegramId)) return;
   if (mode === 'expert') {
-    // Provision the essentials so the owner is a fully bookable Administrator.
+    // Provision the essentials so the owner is a fully bookable Block Expert.
     const user = await getUserByTelegramId(telegramId);
     await setRole(telegramId, 'expert');
     if (user?.rate_cents == null) await setUserRate(telegramId, 4000);
@@ -144,6 +146,19 @@ export async function simulateOrderPay(ctx, chatId, telegramId, orderId) {
   }
   const ok = await confirmOrder(ctx, order, { auto: true });
   await ctx.bot.sendMessage(chatId, ok ? '✅ Simulated payment — order confirmed.' : 'Already confirmed.');
+}
+
+// Remove the seeded demo Block Experts, their bookings/reviews/availability,
+// and the seeded wallet balances. Mirrors src/db/seed_teardown.sql.
+export async function cleanDemoData(ctx, chatId, telegramId) {
+  if (!guard(ctx, chatId, telegramId)) return;
+  const removed = await removeDemoData();
+  await ctx.bot.sendMessage(
+    chatId,
+    removed
+      ? `🧹 Demo data removed — ${removed} demo Block Expert${removed === 1 ? '' : 's'} (and their bookings, reviews, availability) deleted; seeded wallet balances zeroed.`
+      : '🧹 Nothing to clean — demo data was already removed.'
+  );
 }
 
 export async function simulateBookingPay(ctx, chatId, telegramId, bookingId) {

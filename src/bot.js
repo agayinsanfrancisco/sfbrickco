@@ -41,7 +41,7 @@ export function createBot() {
   bot
     .setMyCommands([
       { command: 'shop', description: 'Browse & order 3D-printed parts' },
-      { command: 'book', description: 'Book an Administrator (on-site build help)' },
+      { command: 'book', description: 'Book a Block Expert (on-site build help)' },
       { command: 'wallet', description: 'Add funds & check your balance' },
       { command: 'orders', description: 'Your recent orders & bookings' },
       { command: 'help', description: 'How this bot works' },
@@ -57,7 +57,7 @@ export function createBot() {
       '🧱 *SF Brick Company* 🧱\n\n' +
         'Welcome! Here’s what you can do:\n\n' +
         '🛒 *Shop* — custom 3D-printed accessories & upgrades for building-block brands, shipped to you.\n' +
-        '🛠️ *Book an Administrator* — a vetted local builder comes to you in SF to help build, hands-on.\n' +
+        '🛠️ *Book a Block Expert* — a vetted local builder comes to you in SF to help build, hands-on.\n' +
         '💰 *Wallet* — load credit once, then check out in a tap.\n\n' +
         'Pay in crypto or from your wallet. Tap a button below to start.',
       {
@@ -84,7 +84,7 @@ export function createBot() {
     if (payload === 'shop') return shop.startShop(ctx, msg.chat.id);
     if (payload === 'book') return booking.startBooking(ctx, msg.chat.id);
     if (payload === 'wallet') return wallet.showWallet(ctx, msg.chat.id, from.id);
-    if (payload === 'apply') return apply.startApply(ctx, msg.chat.id);
+    if (payload === 'apply') return apply.startApply(ctx, msg.chat.id, msg.from.id);
     await sendMainMenu(msg.chat.id, from.id);
   });
 
@@ -93,7 +93,7 @@ export function createBot() {
   bot.onText(/^\/help/, (msg) => account.showHelp(ctx, msg.chat.id, msg.from.id));
   bot.onText(/^\/orders/, (msg) => account.showMyOrders(ctx, msg.chat.id, msg.from.id));
   bot.onText(/^\/(wallet|balance)/, (msg) => wallet.showWallet(ctx, msg.chat.id, msg.from.id));
-  bot.onText(/^\/apply/, (msg) => apply.startApply(ctx, msg.chat.id));
+  bot.onText(/^\/apply/, (msg) => apply.startApply(ctx, msg.chat.id, msg.from.id));
   bot.onText(/^\/forgetme/, (msg) =>
     bot.sendMessage(
       msg.chat.id,
@@ -254,6 +254,8 @@ export function createBot() {
         await booking.pickDay(ctx, chatId, sliceAfter(data, 'book:day:'));
       else if (data.startsWith('book:hour:'))
         await booking.pickHour(ctx, chatId, sliceAfter(data, 'book:hour:'));
+      else if (data.startsWith('book:rs:'))
+        await booking.doReschedule(ctx, chatId, telegramId, sliceAfter(data, 'book:rs:'));
       else if (data.startsWith('book:admin:'))
         await booking.chooseAdmin(ctx, chatId, sliceAfter(data, 'book:admin:'));
       else if (data.startsWith('book:pay:'))
@@ -294,13 +296,15 @@ export function createBot() {
         const [coin, cents] = sliceAfter(data, 'wal:coin:').split(':');
         await wallet.payDeposit(ctx, chatId, telegramId, coin, Number.parseInt(cents, 10));
       }
-      // Apply to be an Administrator
+      // Apply to be a Block Expert
       else if (data.startsWith('relay:')) {
-        const [role, bid] = sliceAfter(data, 'relay:').split(':');
-        await relay.startRelay(ctx, chatId, telegramId, bid, role);
+        const parts = sliceAfter(data, 'relay:').split(':');
+        // New: relay:<kind>:<role>:<ref>. Legacy buttons: relay:<role>:<ref> (booking).
+        const [kind, role, ref] = parts.length === 3 ? parts : ['b', parts[0], parts[1]];
+        await relay.startRelay(ctx, chatId, telegramId, kind, ref, role);
       }
-      // Apply to be an Administrator
-      else if (data === 'apply:start') await apply.startApply(ctx, chatId);
+      // Apply to be a Block Expert
+      else if (data === 'apply:start') await apply.startApply(ctx, chatId, telegramId);
       // Account self-service
       else if (data === 'acct:orders') await account.showMyOrders(ctx, chatId, telegramId);
       else if (data.startsWith('acct:payo:'))
@@ -311,6 +315,8 @@ export function createBot() {
         await account.cancelMyOrder(ctx, chatId, telegramId, sliceAfter(data, 'acct:cano:'));
       else if (data.startsWith('acct:canb:'))
         await account.cancelMyBooking(ctx, chatId, telegramId, sliceAfter(data, 'acct:canb:'));
+      else if (data.startsWith('acct:resb:'))
+        await booking.startReschedule(ctx, chatId, telegramId, sliceAfter(data, 'acct:resb:'));
       else if (data === 'acct:forget') {
         await deleteUserData(telegramId);
         sessions.delete(chatId);
@@ -334,6 +340,10 @@ export function createBot() {
       else if (data.startsWith('exp:off:'))
         await expert.toggleTimeOff(ctx, chatId, telegramId, sliceAfter(data, 'exp:off:'), messageId);
       else if (data === 'exp:jobs') await expert.showMyJobs(ctx, chatId, telegramId);
+      else if (data === 'exp:agreeyes') await expert.acceptBuilderAgreement(ctx, chatId, telegramId);
+      else if (data === 'exp:agreeno') await expert.declineBuilderAgreement(ctx, chatId);
+      else if (data.startsWith('exp:done:'))
+        await expert.jobDone(ctx, chatId, telegramId, sliceAfter(data, 'exp:done:'));
       else if (data.startsWith('exp:cancel:'))
         await expert.cancelJob(ctx, chatId, telegramId, sliceAfter(data, 'exp:cancel:'));
       else if (data.startsWith('exp:acc:'))
@@ -351,6 +361,12 @@ export function createBot() {
       else if (data.startsWith('adm:cat:'))
         await admin.showCategory(ctx, chatId, telegramId, sliceAfter(data, 'adm:cat:'));
       else if (data === 'adm:repeat') await admin.showRepeatCustomers(ctx, chatId, telegramId);
+      else if (data === 'adm:payouts') await admin.showPayouts(ctx, chatId, telegramId);
+      else if (data.startsWith('adm:payout:')) {
+        const [eid, cents] = sliceAfter(data, 'adm:payout:').split(':');
+        await admin.doPayout(ctx, chatId, telegramId, eid, cents);
+      } else if (data === 'adm:csv') await admin.exportCsv(ctx, chatId, telegramId);
+      else if (data === 'adm:test:clean') await testmode.cleanDemoData(ctx, chatId, telegramId);
       else if (data === 'adm:test') await testmode.showTestMode(ctx, chatId, telegramId);
       else if (data === 'adm:test:cust') await testmode.setMode(ctx, chatId, telegramId, 'customer');
       else if (data === 'adm:test:build') await testmode.setMode(ctx, chatId, telegramId, 'expert');

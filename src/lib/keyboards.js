@@ -4,7 +4,7 @@
 export function mainMenu({ isExpert, isAdmin } = {}) {
   const rows = [
     [{ text: '🧱 Shop bricks & parts', callback_data: 'shop:start' }],
-    [{ text: '🛠️ Book an Administrator', callback_data: 'book:start' }],
+    [{ text: '🛠️ Book a Block Expert', callback_data: 'book:start' }],
     [
       { text: '💰 Wallet', callback_data: 'wal:menu' },
       { text: '🧾 My orders', callback_data: 'acct:orders' },
@@ -12,7 +12,7 @@ export function mainMenu({ isExpert, isAdmin } = {}) {
     [{ text: '🧰 Apply to be an Admin', callback_data: 'apply:start' }],
   ];
   if (isExpert) {
-    rows.push([{ text: '📋 My jobs (Administrator)', callback_data: 'exp:list' }]);
+    rows.push([{ text: '📋 My jobs (Block Expert)', callback_data: 'exp:list' }]);
     rows.push([{ text: '📍 Update my address', callback_data: 'exp:addr' }]);
   }
   if (isAdmin) rows.push([{ text: '⚙️ Owner panel', callback_data: 'adm:menu' }]);
@@ -128,6 +128,7 @@ const ADMIN_CATEGORIES = {
         { text: '➖ Remove user', callback_data: 'adm:remove' },
         { text: '🔁 Repeat customers', callback_data: 'adm:repeat' },
       ],
+      [{ text: '💸 Builder payouts', callback_data: 'adm:payouts' }],
     ],
   },
   orders: {
@@ -138,6 +139,7 @@ const ADMIN_CATEGORIES = {
         { text: '📋 Bookings', callback_data: 'adm:bookings' },
         { text: '🔎 Find', callback_data: 'adm:find' },
       ],
+      [{ text: '📤 Export CSV', callback_data: 'adm:csv' }],
     ],
   },
   catalog: {

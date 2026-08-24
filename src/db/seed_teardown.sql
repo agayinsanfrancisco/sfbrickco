@@ -10,5 +10,5 @@ delete from ledger where ref_type = 'seed';
 -- Zero the seeded wallet balances.
 update users set balance_cents = 0 where telegram_id in (8524453004, 7200676639);
 
--- Remove the demo Administrators.
+-- Remove the demo Block Experts.
 delete from users where telegram_id in (900000001, 900000002, 900000003);

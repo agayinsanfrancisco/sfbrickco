@@ -1,5 +1,14 @@
 import { config } from '../config.js';
-import { listProducts, getProduct, createOrder, lastDeliveryAddress, logEvent, setOrderPromo } from '../supabase.js';
+import {
+  listProducts,
+  getProduct,
+  createOrder,
+  lastDeliveryAddress,
+  logEvent,
+  setOrderPromo,
+  listBookingsByCustomer,
+  linkOrderToBooking,
+} from '../supabase.js';
 import { priceForProduct, packOptions } from '../lib/pricing.js';
 import { estimateSurcharge } from '../uber.js';
 import { qtyKeyboard } from '../lib/keyboards.js';
@@ -322,10 +331,23 @@ async function finalizeOrder(ctx, chatId, telegramId, note) {
     if (updated) order = updated;
   }
   logEvent(telegramId, 'order_created', { items: cart.length, qty: totalQty, cents: subtotal, upsell: !!s.upsellPercent });
-  await ctx.bot.sendMessage(chatId, `✅ Order *${shortRef(order.id)}* created — thanks!`, {
-    parse_mode: 'Markdown',
-    reply_markup: { remove_keyboard: true },
-  });
+
+  // Upsell + an unpaid booking → fold the parts into the booking's payment so
+  // the customer pays ONCE for both (#combined-pay).
+  let combined = false;
+  if (s.upsellPercent) {
+    const bookings = await listBookingsByCustomer(telegramId, 5);
+    const open = bookings.find((b) => b.payment_status === 'unpaid' && b.status === 'awaiting_payment');
+    if (open && (await linkOrderToBooking(open.id, order.id))) combined = true;
+  }
+
+  await ctx.bot.sendMessage(
+    chatId,
+    combined
+      ? `✅ Order *${shortRef(order.id)}* created and added to your booking — *one payment covers both*.`
+      : `✅ Order *${shortRef(order.id)}* created — thanks!`,
+    { parse_mode: 'Markdown', reply_markup: { remove_keyboard: true } }
+  );
   await presentWaiver(ctx, chatId, 'o', order.id);
 }
 

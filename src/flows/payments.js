@@ -26,6 +26,7 @@ import {
   setOrderPromo,
   recordOrderWaiver,
   recordBookingWaiver,
+  bookingByLinkedOrder,
 } from '../supabase.js';
 
 // Crypto-only payments (BTC/LTC). With an xpub configured, each order gets a
@@ -54,7 +55,7 @@ const WAIVER_ORDER =
 const WAIVER_BOOKING =
   '⚠️ *Before you pay — please read carefully*\n\n' +
   'By tapping *“I agree”* you acknowledge and agree that:\n' +
-  '• Administrators are *independent third-party contractors*. They are NOT employees, agents, partners, or affiliates of SF Brick Company, @redbluebrick\\_bot, or their owners/operators, who act solely as a venue connecting you with the Administrator and are not a party to, and bear no responsibility for, the session or the Administrator’s conduct.\n' +
+  '• Block Experts are *independent third-party contractors*. They are NOT employees, agents, partners, or affiliates of SF Brick Company, @redbluebrick\\_bot, or their owners/operators, who act solely as a venue connecting you with the Block Expert and are not a party to, and bear no responsibility for, the session or the Block Expert’s conduct.\n' +
   '• You assume *all risks* of an in-person, on-site session — including any bodily injury, property damage, theft, or loss — whether arising from negligence or otherwise.\n' +
   '• The service is provided *“AS IS”*. To the maximum extent permitted by law, SF Brick Company and its owners/operators disclaim *all liability* and all warranties, and you agree to *indemnify, defend, and hold them harmless* from any and all claims, damages, or expenses arising from your booking.\n' +
   '• You are at least 18, you authorize entry to the address you provided, and you enter this agreement knowingly and voluntarily.\n\n' +
@@ -88,6 +89,13 @@ export async function acceptWaiver(ctx, chatId, telegramId, kind, ref) {
       return;
     }
     await recordOrderWaiver(ref);
+    // Combined payment: this order rides on a booking's payment — show the
+    // single combined charge instead of a separate order payment.
+    const host = await bookingByLinkedOrder(ref);
+    if (host) {
+      await presentBookingMethods(ctx, chatId, host.id);
+      return;
+    }
     await presentOrderMethods(ctx, chatId, order, null);
   }
 }
@@ -164,6 +172,16 @@ export async function applyPromo(ctx, chatId, code) {
   await presentOrderMethods(ctx, chatId, updated || order, await getProduct(order.sku));
 }
 
+// Combined charge: a booking plus any linked upsell parts order — paid in ONE
+// payment. Returns the full amount due and the linked order (if any, still
+// pending).
+async function bookingCharge(booking) {
+  if (!booking.linked_order_id) return { totalCents: booking.total_cents, linkedOrder: null };
+  const order = await getOrder(booking.linked_order_id);
+  if (!order || order.status !== 'pending') return { totalCents: booking.total_cents, linkedOrder: null };
+  return { totalCents: booking.total_cents + orderTotalCents(order), linkedOrder: order };
+}
+
 export async function presentBookingMethods(ctx, chatId, bookingId) {
   const booking = await getBooking(bookingId);
   if (!booking) {
@@ -174,9 +192,10 @@ export async function presentBookingMethods(ctx, chatId, bookingId) {
     await ctx.bot.sendMessage(chatId, 'We’re still confirming the travel surcharge. Hang tight!');
     return;
   }
+  const { totalCents, linkedOrder } = await bookingCharge(booking);
   const rows = [];
   const balance = await getBalance(booking.customer_telegram_id);
-  if (balance >= booking.total_cents) {
+  if (balance >= totalCents) {
     rows.push([{ text: `💰 Pay from balance (${usd(balance)})`, callback_data: `pm:bal:b:${bookingId}` }]);
   }
   rows.push(...methodButtons('b', bookingId));
@@ -184,12 +203,12 @@ export async function presentBookingMethods(ctx, chatId, bookingId) {
     await ctx.bot.sendMessage(chatId, '💳 Payments aren’t live yet — please check back soon!');
     return;
   }
+  const breakdown = linkedOrder
+    ? ` (${usd(booking.total_cents)} session + ${usd(orderTotalCents(linkedOrder))} bricks — one payment covers both)`
+    : '';
   await ctx.bot.sendMessage(
     chatId,
-    `🧾 Booking total *${usd(booking.total_cents)}* for ${fmtHourRange(
-      booking.slot_start,
-      booking.slot_end
-    )}\nChoose how to pay:`,
+    `🧾 Total *${usd(totalCents)}* for ${fmtHourRange(booking.slot_start, booking.slot_end)}${breakdown}\nChoose how to pay:`,
     { parse_mode: 'Markdown', reply_markup: { inline_keyboard: rows } }
   );
 }
@@ -346,7 +365,7 @@ export async function payOrderCrypto(ctx, chatId, telegramId, coin, orderId, { r
       coin,
       amountCents: total,
       cryptoAmount: amount,
-      detail: `Order: ${order.qty} × ${product?.name || order.sku} → ${order.delivery_address}`,
+      detail: `Order: ${orderItemsSummary(order)} → ${order.delivery_address}`,
       auto,
     });
   }
@@ -362,12 +381,13 @@ export async function payBookingCrypto(ctx, chatId, telegramId, coin, bookingId,
     await ctx.bot.sendMessage(chatId, 'That booking isn’t ready for payment yet.');
     return;
   }
+  const { totalCents } = await bookingCharge(booking);
 
   if (!refresh && booking.pay_address && booking.pay_coin === coin && !isExpired(booking.pay_expires_at)) {
     await sendCryptoInstructions(ctx, chatId, {
       coin,
       address: booking.pay_address,
-      amountCents: booking.total_cents,
+      amountCents: totalCents,
       cryptoAmount: booking.crypto_amount,
       auto: crypto.hasXpub(coin),
       expiresAt: booking.pay_expires_at,
@@ -379,7 +399,7 @@ export async function payBookingCrypto(ctx, chatId, telegramId, coin, bookingId,
 
   let amount, rate;
   try {
-    ({ amount, rate } = await crypto.quoteWithRate(coin, booking.total_cents));
+    ({ amount, rate } = await crypto.quoteWithRate(coin, totalCents));
   } catch {
     await ctx.bot.sendMessage(chatId, '⚠️ Couldn’t fetch the exchange rate. Please try again shortly.');
     return;
@@ -398,7 +418,7 @@ export async function payBookingCrypto(ctx, chatId, telegramId, coin, bookingId,
   await sendCryptoInstructions(ctx, chatId, {
     coin,
     address,
-    amountCents: booking.total_cents,
+    amountCents: totalCents,
     cryptoAmount: amount,
     auto,
     expiresAt: payExpiresAt,
@@ -411,7 +431,7 @@ export async function payBookingCrypto(ctx, chatId, telegramId, coin, bookingId,
       ref: bookingId,
       address,
       coin,
-      amountCents: booking.total_cents,
+      amountCents: totalCents,
       cryptoAmount: amount,
       detail: `Booking: ${fmtHourRange(booking.slot_start, booking.slot_end)} @ ${booking.customer_address}`,
       auto,
@@ -466,7 +486,7 @@ export async function payBookingFromBalance(ctx, chatId, telegramId, bookingId) 
     await ctx.bot.sendMessage(chatId, 'That booking isn’t ready for payment yet.');
     return;
   }
-  const total = booking.total_cents;
+  const { totalCents: total } = await bookingCharge(booking);
   const newBalance = await debitBalance(booking.customer_telegram_id, total, {
     refType: 'booking',
     refId: booking.id,
@@ -551,13 +571,19 @@ export async function confirmOrder(ctx, order, { auto = false } = {}) {
 export async function confirmBooking(ctx, booking, { auto = false } = {}) {
   const paid = await markBookingPaid(booking.id);
   if (!paid) return false; // already confirmed
+  // Combined payment: the booking's payment also covered a linked parts order —
+  // confirm it now (idempotent; no-op if it was somehow paid separately).
+  if (paid.linked_order_id) {
+    const linked = await getOrder(paid.linked_order_id);
+    if (linked && linked.status === 'pending') await confirmOrder(ctx, linked, { auto });
+  }
   const when = fmtHourRange(paid.slot_start, paid.slot_end);
   try {
     await ctx.bot.sendMessage(
       paid.customer_telegram_id,
-      `✅ Payment confirmed! Your Administrator is booked for ${when}.\n` +
+      `✅ Payment confirmed! Your Block Expert is booked for ${when}.\n` +
         'Need to share gate codes or timing? Message them right here — your contact stays private.',
-      { reply_markup: { inline_keyboard: [[{ text: '💬 Message your Administrator', callback_data: `relay:customer:${paid.id}` }]] } }
+      { reply_markup: { inline_keyboard: [[{ text: '💬 Message your Block Expert', callback_data: `relay:b:customer:${paid.id}` }]] } }
     );
   } catch {
     /* ignore */
@@ -576,7 +602,7 @@ export async function confirmBooking(ctx, booking, { auto = false } = {}) {
           builder.telegram_id,
           `💰 Payment received — your job for ${when} at ${paid.customer_address} is confirmed.\n👤 ${firstName}` +
             `\n\nMessage ${firstName} right here to coordinate — their contact stays private, and off-platform bookings aren’t allowed per your agreement.`,
-          { reply_markup: { inline_keyboard: [[{ text: '💬 Message your customer', callback_data: `relay:admin:${paid.id}` }]] } }
+          { reply_markup: { inline_keyboard: [[{ text: '💬 Message your customer', callback_data: `relay:b:admin:${paid.id}` }]] } }
         );
       } catch {
         /* ignore */
@@ -632,11 +658,20 @@ export async function adminDispatch(ctx, chatId, telegramId, orderId) {
       `${o.notes ? `\n📝 ${mdEscape(o.notes)}` : ''}\n\nRequest a courier to this address and it’s on its way.`,
     {
       parse_mode: 'Markdown',
-      reply_markup: { inline_keyboard: [[{ text: '📬 Mark delivered', callback_data: `pm:deliv:${o.id}` }]] },
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '📬 Mark delivered', callback_data: `pm:deliv:${o.id}` }],
+          [{ text: '💬 Message the customer', callback_data: `relay:o:admin:${o.id}` }],
+        ],
+      },
     }
   );
   try {
-    await ctx.bot.sendMessage(o.telegram_id, '🚚 Your order is out for delivery!');
+    await ctx.bot.sendMessage(o.telegram_id, '🚚 Your order is out for delivery!', {
+      reply_markup: {
+        inline_keyboard: [[{ text: '💬 Message us about delivery', callback_data: `relay:o:customer:${o.id}` }]],
+      },
+    });
   } catch {
     /* ignore */
   }

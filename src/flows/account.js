@@ -27,7 +27,7 @@ export async function showHelp(ctx, chatId, telegramId) {
     '/orders — your recent orders & bookings',
     '/help — show this message',
   ];
-  if (user?.role === 'expert' || user?.role === 'admin') lines.push('/builder — Administrator portal');
+  if (user?.role === 'expert' || user?.role === 'admin') lines.push('/builder — Block Expert portal');
   if (isAdminId(telegramId)) lines.push('/owner — owner panel');
   await ctx.bot.sendMessage(chatId, lines.join('\n'), { parse_mode: 'Markdown' });
 }
@@ -79,7 +79,7 @@ export async function showMyOrders(ctx, chatId, telegramId) {
     let status;
     if (b.payment_status === 'paid') status = '✅ paid — confirmed';
     else if (b.payment_status === 'refunded') status = '↩️ refunded';
-    else if (b.status === 'awaiting_acceptance') status = '🕒 finding an Administrator';
+    else if (b.status === 'awaiting_acceptance') status = '🕒 finding a Block Expert';
     else status = '🕒 awaiting payment';
     const text = `🛠️ *${shortRef(b.id)}* — ${fmtHourRange(b.slot_start, b.slot_end)}\n${status} · ${usd(b.total_cents)}`;
     const canPay =
@@ -89,6 +89,11 @@ export async function showMyOrders(ctx, chatId, telegramId) {
     const buttons = [];
     if (canPay) buttons.push({ text: '💳 Show payment', callback_data: `acct:payb:${b.id}` });
     if (canCancel) buttons.push({ text: '✖ Cancel', callback_data: `acct:canb:${b.id}` });
+    const canReschedule =
+      b.expert_id &&
+      ['awaiting_payment', 'accepted'].includes(b.status) &&
+      Date.parse(b.slot_start) > Date.now();
+    if (canReschedule) buttons.push({ text: '📅 Reschedule', callback_data: `acct:resb:${b.id}` });
     const reply_markup = buttons.length ? { inline_keyboard: [buttons] } : undefined;
     await ctx.bot.sendMessage(chatId, text, { parse_mode: 'Markdown', reply_markup });
   }
