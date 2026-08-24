@@ -13,7 +13,6 @@ import * as expert from './flows/expert.js';
 import * as admin from './flows/admin.js';
 import * as review from './flows/review.js';
 import * as payments from './flows/payments.js';
-import { waiverText } from './flows/payments.js';
 import * as account from './flows/account.js';
 import * as wallet from './flows/wallet.js';
 import * as apply from './flows/apply.js';
@@ -265,7 +264,6 @@ export function createBot() {
       else if (data === 'shop:newaddr') await shop.promptNewAddress(ctx, chatId);
       else if (data === 'shop:confirm') await shop.confirmOrder(ctx, chatId, telegramId);
       else if (data === 'shop:note') await shop.promptNote(ctx, chatId);
-      else if (data === 'shop:terms') await bot.sendMessage(chatId, waiverText('o'), { parse_mode: 'Markdown' });
       else if (data === 'shop:cocancel') await shop.cancelCheckout(ctx, chatId);
       // Booking
       else if (data === 'book:start') await booking.startBooking(ctx, chatId);
@@ -282,7 +280,6 @@ export function createBot() {
       else if (data === 'book:travel:ride') await booking.chooseTravel(ctx, chatId, true);
       else if (data === 'book:travel:flat') await booking.chooseTravel(ctx, chatId, false);
       else if (data === 'book:reqok') await booking.confirmRequest(ctx, chatId, telegramId);
-      else if (data === 'book:terms') await booking.showTerms(ctx, chatId);
       else if (data === 'book:cancel') await booking.cancelBooking(ctx, chatId);
       // Payments (method selection / crypto / admin confirm)
       else if (data.startsWith('pm:')) {

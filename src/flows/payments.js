@@ -1,4 +1,5 @@
 import { config, isAdminId } from '../config.js';
+import { issueTermsToken, hasViewedTerms } from '../lib/termsgate.js';
 import * as crypto from '../crypto.js';
 import { usd, fmtHourRange, shortRef, orderItemsSummary, mdEscape } from '../lib/format.js';
 import { orderTotalCents, discountFor } from '../lib/money.js';
@@ -67,18 +68,28 @@ export function waiverText(kind) {
 }
 
 export async function presentWaiver(ctx, chatId, kind, ref) {
-  await ctx.bot.sendMessage(chatId, kind === 'b' ? WAIVER_BOOKING : WAIVER_ORDER, {
-    parse_mode: 'Markdown',
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: '✅ I agree — continue to payment', callback_data: `pm:agree:${kind}:${ref}` }],
-        [{ text: '✖ No, cancel', callback_data: `pm:agreeno:${kind}:${ref}` }],
-      ],
-    },
-  });
+  const url = `${config.server.publicUrl}/terms/${kind}?k=${issueTermsToken(chatId)}`;
+  await ctx.bot.sendMessage(
+    chatId,
+    `⚠️ *Before you pay* — open and read the ${kind === 'b' ? 'booking' : 'sale'} terms, then tap “I agree”.`,
+    {
+      parse_mode: 'Markdown',
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: `📄 Read the ${kind === 'b' ? 'booking' : 'sale'} terms`, url }],
+          [{ text: '✅ I agree — continue to payment', callback_data: `pm:agree:${kind}:${ref}` }],
+          [{ text: '✖ No, cancel', callback_data: `pm:agreeno:${kind}:${ref}` }],
+        ],
+      },
+    }
+  );
 }
 
 export async function acceptWaiver(ctx, chatId, telegramId, kind, ref) {
+  if (!hasViewedTerms(chatId)) {
+    await ctx.bot.sendMessage(chatId, '☝️ Please open the 📄 terms link first — then tap “I agree” again.');
+    return;
+  }
   if (kind === 'b') {
     const booking = await getBooking(ref);
     if (!booking) {

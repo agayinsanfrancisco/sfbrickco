@@ -66,6 +66,7 @@ export const config = {
     port: int('PORT', 3000),
     // Web admin dashboard access token. Unset = /admin is disabled (404).
     adminToken: process.env.ADMIN_DASH_TOKEN || '',
+    publicUrl: (process.env.PUBLIC_URL || 'https://sfbrickco.com').replace(/\/$/, ''),
   },
   cleanup: {
     // Auto-cancel unpaid orders/bookings older than this (abandoned-order sweep).
