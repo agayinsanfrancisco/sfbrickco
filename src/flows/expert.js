@@ -19,7 +19,11 @@ import {
   isExpertTimeOff,
   addExpertTimeOff,
   removeExpertTimeOff,
+  markBookingCompleted,
+  builderEarnings,
+  setBuilderAgreement,
 } from '../supabase.js';
+import { promptReview } from './review.js';
 import { expertJobKeyboard } from '../lib/keyboards.js';
 import { usd, fmtHourRange, shortRef } from '../lib/format.js';
 import { isCovered, BLOCKS, blockActive, upcomingDays, hourlySlots } from '../lib/slots.js';
@@ -30,6 +34,44 @@ function ratingLine(summary) {
   return summary.count ? `⭐ ${summary.avg} (${summary.count})` : '⭐ no ratings yet';
 }
 
+// The contractor / non-circumvention agreement every builder must accept once
+// before they can work. Stored as users.builder_agreement_at.
+const BUILDER_AGREEMENT =
+  '🤝 *Administrator Agreement*\n\n' +
+  'Before you can take jobs, please confirm you agree to the following:\n\n' +
+  '• You are an *independent contractor* — not an employee, agent, or partner of SF Brick Company — and you’re responsible for your own taxes, conduct, and safety.\n' +
+  '• *Non-circumvention:* all bookings, rebookings, and payments with customers you meet through SF Brick Company go *through the platform*. Taking a customer off-platform (or sharing contact info to do so) is grounds for immediate removal and forfeiture of pending payouts.\n' +
+  '• We collect the customer’s payment and pay you out your share (your rate minus the platform fee).\n' +
+  '• You’ll show up on time, keep customer information private, and cancel through the bot if you can’t make it (we’ll reassign the job).\n\n' +
+  'Do you agree?';
+
+async function presentBuilderAgreement(ctx, chatId) {
+  await ctx.bot.sendMessage(chatId, BUILDER_AGREEMENT, {
+    parse_mode: 'Markdown',
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '✅ I agree', callback_data: 'exp:agreeyes' }],
+        [{ text: '✖ Not now', callback_data: 'exp:agreeno' }],
+      ],
+    },
+  });
+}
+
+export async function acceptBuilderAgreement(ctx, chatId, telegramId) {
+  const user = await getUserByTelegramId(telegramId);
+  if (!user || (user.role !== 'expert' && user.role !== 'admin')) return;
+  await setBuilderAgreement(telegramId);
+  await ctx.bot.sendMessage(chatId, '🤝 Agreement recorded — welcome aboard! Opening your portal…');
+  await builderPortal(ctx, chatId, telegramId);
+}
+
+export async function declineBuilderAgreement(ctx, chatId) {
+  await ctx.bot.sendMessage(
+    chatId,
+    'No problem — you can accept anytime with /builder. You won’t receive jobs until then.'
+  );
+}
+
 async function ensureExpert(ctx, chatId, telegramId) {
   const user = await getUserByTelegramId(telegramId);
   if (!user || (user.role !== 'expert' && user.role !== 'admin')) {
@@ -38,6 +80,10 @@ async function ensureExpert(ctx, chatId, telegramId) {
   }
   if (!user.active) {
     await ctx.bot.sendMessage(chatId, 'Your Administrator account is currently inactive.');
+    return null;
+  }
+  if (!user.builder_agreement_at) {
+    await presentBuilderAgreement(ctx, chatId);
     return null;
   }
   return user;
@@ -129,13 +175,24 @@ export async function builderPortal(ctx, chatId, telegramId) {
     await ctx.bot.sendMessage(chatId, 'Your Administrator account is currently inactive.');
     return;
   }
+  if (!user.builder_agreement_at) {
+    await presentBuilderAgreement(ctx, chatId);
+    return;
+  }
 
   const appts = await listBookingsForExpert(user.id);
   const rating = await expertRatingSummary(user.id);
+  const earnings = await builderEarnings(user.id);
+  const fee = config.pricing.platformFeePct;
+  const netEarned = Math.round((earnings.grossCents * (100 - fee)) / 100);
+  const owed = Math.max(0, netEarned - earnings.paidOutCents);
   const rateStr = user.rate_cents != null ? usd(user.rate_cents) : `${usd(config.pricing.serviceFeeCents)} (default)`;
   let body =
     `👷 *Administrator portal*\n📍 Base address: ${user.address || '— not set —'}\n` +
-    `💲 Your rate: ${rateStr}\n${ratingLine(rating)}\n\n`;
+    `💲 Your rate: ${rateStr}\n${ratingLine(rating)}\n` +
+    `💵 Earned ${usd(netEarned)} across ${earnings.jobs} paid job${earnings.jobs === 1 ? '' : 's'} · paid out ${usd(
+      earnings.paidOutCents
+    )} · *owed ${usd(owed)}*\n\n`;
   if (!appts.length) {
     body += 'You have no upcoming appointments yet. Set your availability so customers can book you.';
   } else {
@@ -396,13 +453,46 @@ export async function showMyJobs(ctx, chatId, telegramId) {
   }
   for (const b of jobs) {
     const paid = b.payment_status === 'paid';
+    const sessionStarted = Date.parse(b.slot_start) <= Date.now();
+    const buttons = [];
+    // After a paid session's start, the builder confirms it happened — this
+    // completes the booking, prompts the customer review, and locks earnings.
+    if (paid && sessionStarted) buttons.push({ text: '✅ Job done', callback_data: `exp:done:${b.id}` });
+    buttons.push({ text: '✖ Cancel this job', callback_data: `exp:cancel:${b.id}` });
     await ctx.bot.sendMessage(
       chatId,
       `🛠️ ${shortRef(b.id)} — ${fmtHourRange(b.slot_start, b.slot_end)}\n📍 ${b.customer_address}\n` +
         `💵 ${usd(b.total_cents)} · ${paid ? '✅ paid' : '⏳ awaiting payment'}`,
-      { reply_markup: { inline_keyboard: [[{ text: '✖ Cancel this job', callback_data: `exp:cancel:${b.id}` }]] } }
+      { reply_markup: { inline_keyboard: [buttons] } }
     );
   }
+}
+
+export async function jobDone(ctx, chatId, telegramId, bookingId) {
+  const user = await ensureExpert(ctx, chatId, telegramId);
+  if (!user) return;
+  const booking = await getBooking(bookingId);
+  if (!booking || booking.expert_id !== user.id) {
+    await ctx.bot.sendMessage(chatId, 'That job isn’t yours to complete.');
+    return;
+  }
+  if (Date.parse(booking.slot_start) > Date.now()) {
+    await ctx.bot.sendMessage(chatId, 'That session hasn’t started yet.');
+    return;
+  }
+  const completed = await markBookingCompleted(bookingId);
+  if (!completed) {
+    await ctx.bot.sendMessage(chatId, 'That job can’t be completed (unpaid or already closed).');
+    return;
+  }
+  const fee = config.pricing.platformFeePct;
+  const net = Math.round((completed.service_fee_cents * (100 - fee)) / 100);
+  await ctx.bot.sendMessage(
+    chatId,
+    `🎉 Job ${shortRef(bookingId)} marked done — *${usd(net)}* added to your earnings. The customer has been asked for a rating.`,
+    { parse_mode: 'Markdown' }
+  );
+  if (!completed.review_prompted) await promptReview(ctx, completed);
 }
 
 export async function cancelJob(ctx, chatId, telegramId, bookingId) {

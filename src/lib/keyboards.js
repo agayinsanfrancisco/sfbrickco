@@ -128,6 +128,7 @@ const ADMIN_CATEGORIES = {
         { text: '➖ Remove user', callback_data: 'adm:remove' },
         { text: '🔁 Repeat customers', callback_data: 'adm:repeat' },
       ],
+      [{ text: '💸 Builder payouts', callback_data: 'adm:payouts' }],
     ],
   },
   orders: {
@@ -138,6 +139,7 @@ const ADMIN_CATEGORIES = {
         { text: '📋 Bookings', callback_data: 'adm:bookings' },
         { text: '🔎 Find', callback_data: 'adm:find' },
       ],
+      [{ text: '📤 Export CSV', callback_data: 'adm:csv' }],
     ],
   },
   catalog: {

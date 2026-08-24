@@ -9,6 +9,8 @@ import {
   isExpertBookedAt,
   isExpertTimeOff,
   getUserById,
+  getBooking,
+  rescheduleBooking,
 } from '../supabase.js';
 import { upcomingDays, hourlySlots, isCovered } from '../lib/slots.js';
 import { daysKeyboard, hoursKeyboard } from '../lib/keyboards.js';
@@ -254,4 +256,101 @@ export async function payBooking(ctx, chatId, _telegramId, bookingId) {
 export function cancelBooking(ctx, chatId) {
   ctx.sessions.delete(chatId);
   return ctx.bot.sendMessage(chatId, 'Booking cancelled. Tap /start anytime.');
+}
+
+// ── Reschedule (customer moves an upcoming booking) ──────────────────
+// Same Administrator, new hour they're actually free for. Payment carries over.
+
+async function expertFreeAt(expertId, startIso) {
+  if (await isExpertBookedAt(expertId, startIso)) return false;
+  if (await isExpertTimeOff(expertId, startIso)) return false;
+  const windows = await getExpertAvailability(expertId);
+  if (windows.length && !isCovered(windows, startIso)) return false;
+  return true;
+}
+
+export async function startReschedule(ctx, chatId, telegramId, bookingId) {
+  const booking = await getBooking(bookingId);
+  if (
+    !booking ||
+    booking.customer_telegram_id !== telegramId ||
+    !booking.expert_id ||
+    !['awaiting_payment', 'accepted'].includes(booking.status)
+  ) {
+    await ctx.bot.sendMessage(chatId, 'That booking can’t be rescheduled.');
+    return;
+  }
+  // Collect the free hours for THIS Administrator across the bookable window.
+  const options = [];
+  for (const day of upcomingDays(2)) {
+    for (const slot of hourlySlots(day.dateKey)) {
+      if (slot.startIso === booking.slot_start) continue;
+      if (await expertFreeAt(booking.expert_id, slot.startIso)) {
+        options.push({ ...slot, dayLabel: day.label });
+      }
+    }
+  }
+  if (!options.length) {
+    await ctx.bot.sendMessage(
+      chatId,
+      'No other free hours for your Administrator in the next 12 hours — try again later, or cancel and rebook.'
+    );
+    return;
+  }
+  ctx.sessions.set(chatId, { flow: 'book', step: 'resched', bookingId });
+  const rows = [];
+  for (let i = 0; i < options.length; i += 2) {
+    rows.push(
+      options.slice(i, i + 2).map((s) => ({
+        text: `${s.dayLabel} ${s.label}`,
+        callback_data: `book:rs:${s.startIso}`,
+      }))
+    );
+  }
+  await ctx.bot.sendMessage(
+    chatId,
+    `📅 *Reschedule* — currently ${fmtHourRange(booking.slot_start, booking.slot_end)}.\nPick a new start time:`,
+    { parse_mode: 'Markdown', reply_markup: { inline_keyboard: rows } }
+  );
+}
+
+export async function doReschedule(ctx, chatId, telegramId, startIso) {
+  const s = ctx.sessions.get(chatId);
+  if (s?.step !== 'resched' || !s.bookingId) return;
+  ctx.sessions.delete(chatId);
+  const booking = await getBooking(s.bookingId);
+  if (!booking || booking.customer_telegram_id !== telegramId) return;
+  // Re-validate at tap time (someone may have grabbed the hour meanwhile).
+  if (!(await expertFreeAt(booking.expert_id, startIso))) {
+    await ctx.bot.sendMessage(chatId, 'That hour was just taken — tap Reschedule again to pick another.');
+    return;
+  }
+  const endIso = new Date(new Date(startIso).getTime() + 60 * 60 * 1000).toISOString();
+  const updated = await rescheduleBooking(s.bookingId, startIso, endIso);
+  if (!updated) {
+    await ctx.bot.sendMessage(chatId, 'That booking can’t be rescheduled anymore.');
+    return;
+  }
+  await ctx.bot.sendMessage(
+    chatId,
+    `✅ Rescheduled to *${fmtHourRange(updated.slot_start, updated.slot_end)}* — same Administrator${
+      updated.payment_status === 'paid' ? ', already paid' : ''
+    }.`,
+    { parse_mode: 'Markdown' }
+  );
+  // Tell the Administrator their job moved.
+  const admin = await getUserById(updated.expert_id);
+  if (admin) {
+    try {
+      await ctx.bot.sendMessage(
+        admin.telegram_id,
+        `📅 Schedule change: your job at ${updated.customer_address} moved to ${fmtHourRange(
+          updated.slot_start,
+          updated.slot_end
+        )}.`
+      );
+    } catch {
+      /* ignore */
+    }
+  }
 }

@@ -15,9 +15,21 @@ create table if not exists users (
   address       text,                          -- Administrator base/pickup address
   rate_cents    integer,                        -- Administrator's per-session rate (null = global default)
   balance_cents integer not null default 0,     -- prepaid wallet balance (USD cents)
+  builder_agreement_at timestamptz,             -- contractor/non-circumvention agreement accepted
   created_at    timestamptz not null default now()
 );
 alter table users enable row level security;
+
+-- ── Builder payouts (what we've transferred to each Administrator) ────
+create table if not exists payouts (
+  id           uuid primary key default gen_random_uuid(),
+  expert_id    uuid not null references users(id),
+  amount_cents int not null check (amount_cents > 0),
+  note         text,
+  created_at   timestamptz not null default now()
+);
+create index if not exists payouts_expert_idx on payouts (expert_id);
+alter table payouts enable row level security;
 
 -- ── Orders (3D-printed accessory sales) ──────────────────────────────
 create table if not exists orders (
@@ -92,6 +104,7 @@ create table if not exists bookings (
   pay_block_height      int,
   refund_txid           text,
   refunded_at           timestamptz,
+  linked_order_id       uuid references orders(id),  -- combined payment: parts order paid with this booking
   created_at            timestamptz not null default now()
 );
 create index if not exists bookings_status_idx on bookings (status, payment_status);

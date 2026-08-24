@@ -52,6 +52,24 @@ async function alertUnderpaid(ctx, kind, item, confirmedSats) {
       /* admin hasn't opened the bot */
     }
   }
+  // Tell the customer too, with the exact shortfall and the SAME address —
+  // most underpayments are fee-rounding and a small top-up completes the order.
+  const customerId = kind === 'order' ? item.telegram_id : item.customer_telegram_id;
+  const shortfallSats = Math.max(0, crypto.toSats(item.crypto_amount) - confirmedSats);
+  if (customerId && shortfallSats > 0) {
+    try {
+      await ctx.bot.sendMessage(
+        customerId,
+        `⚠️ *Your payment arrived a little short.*\n` +
+          `We received ${(confirmedSats / 1e8).toFixed(8)} ${c.ticker} but need ${item.crypto_amount} ${c.ticker}.\n\n` +
+          `Send the difference — *${(shortfallSats / 1e8).toFixed(8)} ${c.ticker}* — to the same address:\n` +
+          `\`${item.pay_address}\`\n\nWe’ll confirm automatically as soon as it lands.`,
+        { parse_mode: 'Markdown' }
+      );
+    } catch {
+      /* customer hasn't opened the bot */
+    }
+  }
 }
 
 async function settle(ctx, kind, item, confirm, recordTx) {

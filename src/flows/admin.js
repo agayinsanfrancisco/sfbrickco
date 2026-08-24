@@ -12,6 +12,9 @@ import {
   getUserById,
   addBuilderInvite,
   repeatCustomers,
+  builderPayoutData,
+  recordPayout,
+  exportRows,
   listInventory,
   setStock,
   listPaidUndispatchedOrders,
@@ -341,6 +344,92 @@ export async function doRefund(ctx, chatId, text) {
   } catch {
     /* ignore */
   }
+}
+
+// ── Builder payouts ──────────────────────────────────────────────────
+// Owed = net of all PAID bookings (rate minus the platform fee) minus what's
+// already been paid out. "Mark paid" records the transfer (you send the funds
+// however you like — this is the ledger).
+export async function showPayouts(ctx, chatId, telegramId) {
+  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const { earned, paid } = await builderPayoutData();
+  const fee = config.pricing.platformFeePct;
+  const byExpert = new Map();
+  for (const b of earned) {
+    const cur = byExpert.get(b.expert_id) || { gross: 0, paidOut: 0, jobs: 0 };
+    cur.gross += b.service_fee_cents || 0;
+    cur.jobs += 1;
+    byExpert.set(b.expert_id, cur);
+  }
+  for (const p of paid) {
+    const cur = byExpert.get(p.expert_id) || { gross: 0, paidOut: 0, jobs: 0 };
+    cur.paidOut += p.amount_cents || 0;
+    byExpert.set(p.expert_id, cur);
+  }
+  if (!byExpert.size) {
+    await ctx.bot.sendMessage(chatId, 'No paid bookings yet — nothing to pay out.');
+    return;
+  }
+  const lines = [];
+  const rows = [];
+  for (const [expertId, v] of byExpert) {
+    const u = await getUserById(expertId);
+    const name = u?.full_name || (u?.username ? `@${u.username}` : expertId.slice(0, 8));
+    const net = Math.round((v.gross * (100 - fee)) / 100);
+    const owed = Math.max(0, net - v.paidOut);
+    lines.push(`• ${name}: ${v.jobs} job${v.jobs === 1 ? '' : 's'} · earned ${usd(net)} · paid ${usd(v.paidOut)} · owed *${usd(owed)}*`);
+    if (owed > 0) rows.push([{ text: `💸 Pay ${name} ${usd(owed)}`, callback_data: `adm:payout:${expertId}:${owed}` }]);
+  }
+  rows.push([{ text: '⬅️ Back to panel', callback_data: 'adm:menu' }]);
+  await ctx.bot.sendMessage(
+    chatId,
+    `💸 *Builder payouts* (after the ${fee}% platform fee)\n\n${lines.join('\n')}\n\nTap to record a payout once you’ve sent the funds:`,
+    { parse_mode: 'Markdown', reply_markup: { inline_keyboard: rows } }
+  );
+}
+
+export async function doPayout(ctx, chatId, telegramId, expertId, amountCents) {
+  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const amount = Number.parseInt(amountCents, 10);
+  if (!Number.isInteger(amount) || amount <= 0) return;
+  await recordPayout(expertId, amount, 'owner-marked');
+  const u = await getUserById(expertId);
+  await ctx.bot.sendMessage(chatId, `✅ Recorded ${usd(amount)} payout to ${u?.full_name || 'builder'}.`);
+  try {
+    if (u) await ctx.bot.sendMessage(u.telegram_id, `💸 You’ve been paid *${usd(amount)}* — check your wallet/account. Thanks for building with us!`, { parse_mode: 'Markdown' });
+  } catch {
+    /* ignore */
+  }
+  await showPayouts(ctx, chatId, telegramId);
+}
+
+// ── CSV export (orders + bookings, for bookkeeping) ──────────────────
+function toCsv(rows, columns) {
+  const esc = (v) => {
+    const s = v == null ? '' : typeof v === 'object' ? JSON.stringify(v) : String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  };
+  return [columns.join(','), ...rows.map((r) => columns.map((c) => esc(r[c])).join(','))].join('\n');
+}
+
+export async function exportCsv(ctx, chatId, telegramId) {
+  if (!ensureAdmin(ctx, chatId, telegramId)) return;
+  const { orders, bookings } = await exportRows();
+  const orderCols = ['id', 'created_at', 'telegram_id', 'sku', 'qty', 'amount_cents', 'delivery_fee_cents', 'discount_cents', 'status', 'payment_method', 'pay_coin', 'crypto_amount', 'pay_txid', 'delivery_address'];
+  const bookingCols = ['id', 'created_at', 'customer_telegram_id', 'expert_id', 'slot_start', 'slot_end', 'service_fee_cents', 'surcharge_cents', 'total_cents', 'payment_status', 'status', 'pay_coin', 'crypto_amount', 'pay_txid', 'customer_address'];
+  const stamp = new Date().toISOString().slice(0, 10);
+  await ctx.bot.sendDocument(
+    chatId,
+    Buffer.from(toCsv(orders, orderCols), 'utf8'),
+    {},
+    { filename: `orders-${stamp}.csv`, contentType: 'text/csv' }
+  );
+  await ctx.bot.sendDocument(
+    chatId,
+    Buffer.from(toCsv(bookings, bookingCols), 'utf8'),
+    {},
+    { filename: `bookings-${stamp}.csv`, contentType: 'text/csv' }
+  );
 }
 
 // ── Repeat-customer report ───────────────────────────────────────────

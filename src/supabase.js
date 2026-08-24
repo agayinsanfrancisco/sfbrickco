@@ -829,6 +829,134 @@ export async function repeatCustomers(minBookings = 2) {
   return rows;
 }
 
+// ── Combined payment: link an upsell parts order to a booking ─────────
+export async function linkOrderToBooking(bookingId, orderId) {
+  const { data } = await supabase
+    .from('bookings')
+    .update({ linked_order_id: orderId })
+    .eq('id', bookingId)
+    .eq('payment_status', 'unpaid')
+    .select('*')
+    .maybeSingle();
+  return data;
+}
+
+export async function bookingByLinkedOrder(orderId) {
+  const { data } = await supabase
+    .from('bookings')
+    .select('*')
+    .eq('linked_order_id', orderId)
+    .eq('payment_status', 'unpaid')
+    .maybeSingle();
+  return data;
+}
+
+// ── Reschedule (customer moves a booking to a new free hour) ─────────
+export async function rescheduleBooking(bookingId, slotStartIso, slotEndIso) {
+  const { data } = await supabase
+    .from('bookings')
+    .update({ slot_start: slotStartIso, slot_end: slotEndIso, reminded: false })
+    .eq('id', bookingId)
+    .in('status', ['awaiting_payment', 'accepted'])
+    .select('*')
+    .maybeSingle();
+  return data;
+}
+
+// ── Job-done confirmation ────────────────────────────────────────────
+export async function markBookingCompleted(bookingId) {
+  const { data } = await supabase
+    .from('bookings')
+    .update({ status: 'completed' })
+    .eq('id', bookingId)
+    .eq('payment_status', 'paid')
+    .in('status', ['accepted'])
+    .select('*')
+    .maybeSingle();
+  return data;
+}
+
+// ── Builder payouts ──────────────────────────────────────────────────
+// Earned basis: every PAID booking's service fee (the builder's gross). The
+// flow layer applies the platform-fee % to get net. Payouts are what we've
+// actually transferred.
+export async function builderPayoutData() {
+  const [{ data: earned }, { data: paid }] = await Promise.all([
+    supabase
+      .from('bookings')
+      .select('expert_id, service_fee_cents')
+      .eq('payment_status', 'paid')
+      .not('expert_id', 'is', null),
+    supabase.from('payouts').select('expert_id, amount_cents'),
+  ]);
+  return { earned: earned || [], paid: paid || [] };
+}
+
+export async function recordPayout(expertId, amountCents, note = null) {
+  const { data, error } = await supabase
+    .from('payouts')
+    .insert({ expert_id: expertId, amount_cents: amountCents, note })
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+// One builder's totals (for their portal).
+export async function builderEarnings(expertId) {
+  const [{ data: earned }, { data: paid }] = await Promise.all([
+    supabase
+      .from('bookings')
+      .select('service_fee_cents')
+      .eq('expert_id', expertId)
+      .eq('payment_status', 'paid'),
+    supabase.from('payouts').select('amount_cents').eq('expert_id', expertId),
+  ]);
+  return {
+    grossCents: (earned || []).reduce((s, b) => s + (b.service_fee_cents || 0), 0),
+    paidOutCents: (paid || []).reduce((s, p) => s + (p.amount_cents || 0), 0),
+    jobs: (earned || []).length,
+  };
+}
+
+// ── Builder agreement (non-circumvention / contractor terms) ─────────
+export async function setBuilderAgreement(telegramId) {
+  const { data } = await supabase
+    .from('users')
+    .update({ builder_agreement_at: new Date().toISOString() })
+    .eq('telegram_id', telegramId)
+    .select('*')
+    .maybeSingle();
+  return data;
+}
+
+// ── Demo-data teardown (mirror of src/db/seed_teardown.sql) ───────────
+export async function removeDemoData() {
+  const DEMO_TIDS = [900000001, 900000002, 900000003];
+  const { data: demoUsers } = await supabase.from('users').select('id').in('telegram_id', DEMO_TIDS);
+  const ids = (demoUsers || []).map((u) => u.id);
+  if (ids.length) {
+    await supabase.from('reviews').delete().in('expert_id', ids);
+    await supabase.from('bookings').delete().in('expert_id', ids);
+    await supabase.from('expert_availability').delete().in('expert_id', ids);
+    await supabase.from('expert_time_off').delete().in('expert_id', ids);
+    await supabase.from('payouts').delete().in('expert_id', ids);
+  }
+  await supabase.from('ledger').delete().eq('ref_type', 'seed');
+  await supabase.from('users').update({ balance_cents: 0 }).in('telegram_id', [8524453004, 7200676639]);
+  await supabase.from('users').delete().in('telegram_id', DEMO_TIDS);
+  return ids.length;
+}
+
+// ── CSV export (owner bookkeeping) ───────────────────────────────────
+export async function exportRows() {
+  const [{ data: orders }, { data: bookings }] = await Promise.all([
+    supabase.from('orders').select('*').order('created_at', { ascending: false }).limit(1000),
+    supabase.from('bookings').select('*').order('created_at', { ascending: false }).limit(1000),
+  ]);
+  return { orders: orders || [], bookings: bookings || [] };
+}
+
 // ── Inventory ────────────────────────────────────────────────────────
 export async function getInventory(sku) {
   const { data } = await supabase.from('inventory').select('*').eq('sku', sku).maybeSingle();

@@ -89,6 +89,11 @@ export async function showMyOrders(ctx, chatId, telegramId) {
     const buttons = [];
     if (canPay) buttons.push({ text: '💳 Show payment', callback_data: `acct:payb:${b.id}` });
     if (canCancel) buttons.push({ text: '✖ Cancel', callback_data: `acct:canb:${b.id}` });
+    const canReschedule =
+      b.expert_id &&
+      ['awaiting_payment', 'accepted'].includes(b.status) &&
+      Date.parse(b.slot_start) > Date.now();
+    if (canReschedule) buttons.push({ text: '📅 Reschedule', callback_data: `acct:resb:${b.id}` });
     const reply_markup = buttons.length ? { inline_keyboard: [buttons] } : undefined;
     await ctx.bot.sendMessage(chatId, text, { parse_mode: 'Markdown', reply_markup });
   }
