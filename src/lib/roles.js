@@ -20,11 +20,12 @@
 //
 // Legacy DB value 'admin' is treated as 'administrator'.
 
-export const STAFF_ROLES = ['owner', 'administrator', 'block_manager', 'store_manager'];
+export const STAFF_ROLES = ['owner', 'administrator', 'block_manager', 'store_manager', 'support'];
 
 const CAPS = {
   owner: new Set([
     'panel', 'view_users', 'view_contact',
+    'view_orders', 'view_bookings',
     'manage_experts', 'manage_orders',
     'approve_applications', 'refunds', 'payouts',
     'manage_roles', 'manage_admins',
@@ -32,13 +33,17 @@ const CAPS = {
   ]),
   administrator: new Set([
     'panel', 'view_users', 'view_contact',
+    'view_orders', 'view_bookings',
     'manage_experts', 'manage_orders',
     'approve_applications', 'refunds', 'payouts',
     'manage_roles',
     'catalog', 'broadcast', 'reports',
   ]),
-  block_manager: new Set(['panel', 'view_users', 'manage_experts']),
-  store_manager: new Set(['panel', 'view_users', 'manage_orders']),
+  block_manager: new Set(['panel', 'view_users', 'view_bookings', 'manage_experts']),
+  store_manager: new Set(['panel', 'view_users', 'view_orders', 'manage_orders']),
+  // Support: read-only eyes on orders, bookings, and (masked) users so they
+  // can answer "where's my order?" — no action buttons, no approvals, no money.
+  support: new Set(['panel', 'view_users', 'view_orders', 'view_bookings']),
   expert: new Set(),
   customer: new Set(),
 };
@@ -63,8 +68,8 @@ export function isStaff(role) {
 // Which roles an actor may assign. Administrators can hand out the manager
 // and expert roles (and demote to customer); only Owners touch Administrators.
 export function assignableRoles(actorRole) {
-  if (actorRole === 'owner') return ['administrator', 'block_manager', 'store_manager', 'expert', 'customer'];
-  if (actorRole === 'administrator') return ['block_manager', 'store_manager', 'expert', 'customer'];
+  if (actorRole === 'owner') return ['administrator', 'block_manager', 'store_manager', 'support', 'expert', 'customer'];
+  if (actorRole === 'administrator') return ['block_manager', 'store_manager', 'support', 'expert', 'customer'];
   return [];
 }
 
@@ -101,6 +106,7 @@ export const ROLE_LABELS = {
   administrator: 'Administrator',
   block_manager: 'Block Manager',
   store_manager: 'Store Manager',
+  support: 'Support',
   expert: 'Block Expert',
   customer: 'Customer',
   admin: 'Administrator', // legacy

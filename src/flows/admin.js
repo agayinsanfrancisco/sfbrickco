@@ -151,7 +151,7 @@ export async function doRemove(ctx, chatId, text) {
 
 // List open (unaccepted) bookings with an "assign a builder" affordance.
 export async function showBookings(ctx, chatId, telegramId) {
-  const role = await ensureCap(ctx, chatId, telegramId, 'manage_experts');
+  const role = await ensureCap(ctx, chatId, telegramId, 'view_bookings');
   if (!role) return;
   const [open, awaitingPay] = await Promise.all([listOpenBookings(), listAwaitingPaymentBookings()]);
   if (!open.length && !awaitingPay.length) {
@@ -164,7 +164,9 @@ export async function showBookings(ctx, chatId, telegramId) {
       `🕑 ${fmtHourRange(b.slot_start, b.slot_end)}\n📍 ${b.customer_address}\n💵 Service ${usd(
         b.service_fee_cents
       )} (+ travel on accept)`,
-      { reply_markup: { inline_keyboard: [[{ text: '👤 Assign a Block Expert', callback_data: `adm:assign:${b.id}` }]] } }
+      can(role, 'manage_experts')
+        ? { reply_markup: { inline_keyboard: [[{ text: '👤 Assign a Block Expert', callback_data: `adm:assign:${b.id}` }]] } }
+        : {}
     );
   }
   for (const b of awaitingPay) {
@@ -174,9 +176,9 @@ export async function showBookings(ctx, chatId, telegramId) {
         `💵 Total ${usd(b.total_cents)} (service ${usd(b.service_fee_cents)} + travel ${usd(b.surcharge_cents)})`,
       {
         parse_mode: 'Markdown',
-        reply_markup: {
-          inline_keyboard: [[{ text: '✅ Log payment (paid another way)', callback_data: `pm:ok:b:${b.id}` }]],
-        },
+        reply_markup: can(role, 'manage_orders')
+          ? { inline_keyboard: [[{ text: '✅ Log payment (paid another way)', callback_data: `pm:ok:b:${b.id}` }]] }
+          : undefined,
       }
     );
   }
@@ -258,7 +260,7 @@ export async function assignExpert(ctx, chatId, telegramId, bookingId, expertId)
 
 // ── Open orders (paid, awaiting dispatch) (#12) ──────────────────────
 export async function showOpenOrders(ctx, chatId, telegramId) {
-  const role = await ensureCap(ctx, chatId, telegramId, 'manage_orders');
+  const role = await ensureCap(ctx, chatId, telegramId, 'view_orders');
   if (!role) return;
   const orders = await listPaidUndispatchedOrders();
   if (!orders.length) {
@@ -273,7 +275,9 @@ export async function showOpenOrders(ctx, chatId, telegramId) {
         `${o.notes ? `\n📝 ${o.notes}` : ''}\n${usd(total)}`,
       {
         parse_mode: 'Markdown',
-        reply_markup: { inline_keyboard: [[{ text: '🚚 Accept & dispatch', callback_data: `pm:disp:${o.id}` }]] },
+        reply_markup: can(role, 'manage_orders')
+          ? { inline_keyboard: [[{ text: '🚚 Accept & dispatch', callback_data: `pm:disp:${o.id}` }]] }
+          : undefined,
       }
     );
   }
@@ -305,13 +309,16 @@ export async function doBroadcast(ctx, chatId, text) {
 
 // ── Order lookup by ref (#38) ────────────────────────────────────────
 export async function promptFindOrder(ctx, chatId, telegramId) {
-  const role = await ensureCap(ctx, chatId, telegramId, 'manage_orders');
+  const role = await ensureCap(ctx, chatId, telegramId, 'view_orders');
   if (!role) return;
-  ctx.sessions.set(chatId, { flow: 'admin', step: 'awaiting_find_order' });
+  ctx.sessions.set(chatId, { flow: 'admin', step: 'awaiting_find_order', data: { role } });
   await ctx.bot.sendMessage(chatId, 'Send an order ref (e.g. SFB-3F9A2C):');
 }
 
 export async function doFindOrder(ctx, chatId, text) {
+  // Viewer's role was stashed by promptFindOrder (text handlers have no
+  // telegramId); default to the most restricted staff view.
+  const role = ctx.sessions.get(chatId)?.data?.role || 'support';
   ctx.sessions.delete(chatId);
   const key = String(text).toUpperCase().replace(/[^0-9A-F]/g, '').slice(0, 6);
   if (key.length < 4) {
@@ -326,10 +333,10 @@ export async function doFindOrder(ctx, chatId, text) {
   }
   const total = (o.amount_cents || 0) + (o.delivery_fee_cents || 0) - (o.discount_cents || 0);
   const rows = [];
-  if (o.status === 'pending') {
+  if (o.status === 'pending' && can(role, 'manage_orders')) {
     rows.push([{ text: '✅ Log payment (paid another way)', callback_data: `pm:ok:o:${o.id}` }]);
   }
-  if (['paid', 'dispatched', 'delivered'].includes(o.status)) {
+  if (['paid', 'dispatched', 'delivered'].includes(o.status) && can(role, 'refunds')) {
     rows.push([{ text: '↩️ Mark refunded', callback_data: `adm:refundo:${o.id}` }]);
   }
   await ctx.bot.sendMessage(

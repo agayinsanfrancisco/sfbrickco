@@ -107,7 +107,7 @@ export function adminMenu(role) {
   const rows = [];
   if (can(role, 'view_users') || can(role, 'manage_experts') || can(role, 'manage_roles'))
     rows.push([{ text: '👥 People', callback_data: 'adm:cat:people' }]);
-  if (can(role, 'manage_orders') || can(role, 'manage_experts'))
+  if (can(role, 'view_orders') || can(role, 'view_bookings') || can(role, 'manage_experts'))
     rows.push([{ text: '📦 Orders & Bookings', callback_data: 'adm:cat:orders' }]);
   if (can(role, 'catalog')) rows.push([{ text: '🧱 Catalog & Promos', callback_data: 'adm:cat:catalog' }]);
   if (can(role, 'settings') || can(role, 'broadcast'))
@@ -136,9 +136,9 @@ const ADMIN_CATEGORIES = {
   orders: {
     title: '📦 Orders & Bookings',
     buttons: [
-      { text: '📦 Open orders', callback_data: 'adm:orders', cap: 'manage_orders' },
-      { text: '🔎 Find order', callback_data: 'adm:find', cap: 'manage_orders' },
-      { text: '📋 Bookings', callback_data: 'adm:bookings', cap: 'manage_experts' },
+      { text: '📦 Open orders', callback_data: 'adm:orders', cap: 'view_orders' },
+      { text: '🔎 Find order', callback_data: 'adm:find', cap: 'view_orders' },
+      { text: '📋 Bookings', callback_data: 'adm:bookings', cap: 'view_bookings' },
       { text: '📤 Export CSV', callback_data: 'adm:csv', cap: 'reports' },
     ],
   },
