@@ -107,9 +107,9 @@ function main() {
   const { bot, ctx } = createBot();
   console.log('🤖 Telegram bot started (long polling).');
 
-  const app = createServer();
+  const app = createServer(ctx);
   app.listen(config.server.port, () => {
-    console.log(`🌐 Web server on :${config.server.port} (landing page + /health)`);
+    console.log(`🌐 Web server on :${config.server.port} (landing page + /health + /admin)`);
   });
 
   startReviewScheduler(ctx);

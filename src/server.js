@@ -2,6 +2,7 @@ import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { supabase } from './supabase.js';
+import { createWebAdmin } from './webadmin.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = path.join(__dirname, '..', 'public');
@@ -9,8 +10,10 @@ const PUBLIC_DIR = path.join(__dirname, '..', 'public');
 // Express app: serves the public marketing/policy site + a health check.
 // Payments are crypto-only (BTC/LTC) with in-bot admin confirmation, so there
 // is no payment webhook to host in this first run.
-export function createServer() {
+export function createServer(ctx) {
   const app = express();
+  app.set('trust proxy', 1); // behind Traefik — real client IP for login rate limit
+  app.use(createWebAdmin(ctx));
   // Deep health check (#35): verify DB connectivity so Coolify restarts on real
   // failure, not just process liveness. Returns 503 when the DB is unreachable.
   app.get('/health', async (_req, res) => {

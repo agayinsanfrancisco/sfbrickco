@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>SF Brick Co — Admin</title>
+<style>
+  :root {
+    --bg: #fafaf9; --panel: #ffffff; --ink: #1c1917; --muted: #78716c;
+    --line: #e7e5e4; --brick: #b91c1c; --brick-dark: #991b1b; --ok: #15803d;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: center; gap: 12px; padding: 14px 24px;
+    background: var(--panel); border-bottom: 1px solid var(--line); }
+  header h1 { font-size: 16px; margin: 0; letter-spacing: -0.01em; }
+  header .spacer { flex: 1; }
+  nav { display: flex; gap: 2px; padding: 0 24px; background: var(--panel);
+    border-bottom: 1px solid var(--line); }
+  nav button { border: 0; background: none; padding: 10px 14px; font: inherit;
+    color: var(--muted); cursor: pointer; border-bottom: 2px solid transparent; }
+  nav button.on { color: var(--ink); border-bottom-color: var(--brick); font-weight: 600; }
+  nav button .badge { display: inline-block; min-width: 18px; padding: 0 5px;
+    margin-left: 6px; border-radius: 9px; background: var(--brick); color: #fff;
+    font-size: 12px; line-height: 18px; text-align: center; }
+  main { max-width: 1080px; margin: 0 auto; padding: 24px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }
+  .card .n { font-size: 28px; font-weight: 700; letter-spacing: -0.02em; }
+  .card .l { color: var(--muted); font-size: 13px; }
+  .tablewrap { overflow-x: auto; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th { text-align: left; color: var(--muted); font-weight: 600; font-size: 12px;
+    text-transform: uppercase; letter-spacing: 0.04em; }
+  th, td { padding: 10px 14px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  tr:last-child td { border-bottom: 0; }
+  td.wrap { white-space: normal; min-width: 180px; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px;
+    border: 1px solid var(--line); color: var(--muted); }
+  .pill.paid, .pill.accepted { color: var(--ok); border-color: currentColor; }
+  .pill.pending, .pill.awaiting_payment, .pill.awaiting_acceptance { color: #b45309; border-color: currentColor; }
+  .pill.refunded, .pill.cancelled { color: var(--brick); border-color: currentColor; }
+  button.act { border: 1px solid var(--line); background: var(--panel); border-radius: 6px;
+    padding: 4px 10px; font: inherit; font-size: 13px; cursor: pointer; }
+  button.act:hover { border-color: var(--ink); }
+  button.act.primary { background: var(--brick); border-color: var(--brick); color: #fff; }
+  button.act.primary:hover { background: var(--brick-dark); }
+  .empty { color: var(--muted); padding: 32px; text-align: center; }
+  #msg { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+    background: var(--ink); color: #fff; padding: 8px 16px; border-radius: 6px;
+    font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+  #msg.show { opacity: 1; }
+  /* login */
+  #login { max-width: 320px; margin: 18vh auto; background: var(--panel);
+    border: 1px solid var(--line); border-radius: 10px; padding: 28px; }
+  #login h2 { margin: 0 0 4px; font-size: 18px; }
+  #login p { margin: 0 0 16px; color: var(--muted); font-size: 14px; }
+  #login input { width: 100%; padding: 9px 11px; border: 1px solid var(--line);
+    border-radius: 6px; font: inherit; margin-bottom: 12px; }
+  #login button { width: 100%; padding: 9px; border: 0; border-radius: 6px;
+    background: var(--brick); color: #fff; font: inherit; font-weight: 600; cursor: pointer; }
+  #login .err { color: var(--brick); font-size: 13px; min-height: 18px; margin-top: 8px; }
+  .hidden { display: none !important; }
+  h2.sec { font-size: 15px; margin: 22px 0 10px; }
+</style>
+</head>
+<body>
+
+<div id="login" class="hidden">
+  <h2>🧱 SF Brick Co</h2>
+  <p>Owner dashboard</p>
+  <input id="tok" type="password" placeholder="Access token" autocomplete="current-password">
+  <button onclick="login()">Sign in</button>
+  <div class="err" id="loginerr"></div>
+</div>
+
+<div id="app" class="hidden">
+  <header>
+    <h1>🧱 SF Brick Co — Admin</h1>
+    <div class="spacer"></div>
+    <button class="act" onclick="refresh()">Refresh</button>
+    <button class="act" onclick="logout()">Sign out</button>
+  </header>
+  <nav id="tabs"></nav>
+  <main id="view"></main>
+</div>
+
+<div id="msg"></div>
+
+<script>
+const TABS = ['Overview', 'Applicants', 'Orders', 'Bookings', 'Users'];
+let cur = 'Overview';
+let counts = {};
+
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const usd = (c) => '$' + ((c || 0) / 100).toFixed(2);
+const when = (iso) => iso ? new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : '—';
+const ref = (id) => 'SFB-' + String(id).replace(/-/g, '').slice(0, 6).toUpperCase();
+const pill = (s) => `<span class="pill ${esc(s)}">${esc(s)}</span>`;
+
+function toast(t) { const m = $('msg'); m.textContent = t; m.classList.add('show'); setTimeout(() => m.classList.remove('show'), 2500); }
+
+async function api(p, opts) {
+  const res = await fetch('/admin/api' + p, opts);
+  if (res.status === 401) { show('login'); throw new Error('unauthorized'); }
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || res.statusText);
+  return body;
+}
+const post = (p) => api(p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+
+function show(which) { $('login').classList.toggle('hidden', which !== 'login'); $('app').classList.toggle('hidden', which !== 'app'); }
+
+async function login() {
+  $('loginerr').textContent = '';
+  const res = await fetch('/admin/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: $('tok').value }) });
+  if (!res.ok) { $('loginerr').textContent = (await res.json().catch(() => ({}))).error || 'Login failed'; return; }
+  $('tok').value = '';
+  show('app'); refresh();
+}
+$('tok').addEventListener('keydown', (e) => { if (e.key === 'Enter') login(); });
+
+async function logout() { await fetch('/admin/logout', { method: 'POST' }); show('login'); }
+
+function drawTabs() {
+  $('tabs').innerHTML = TABS.map((t) => {
+    const n = t === 'Applicants' ? counts.pendingApplications : t === 'Orders' ? counts.ordersAwaitingDispatch : 0;
+    return `<button class="${t === cur ? 'on' : ''}" onclick="go('${t}')">${t}${n ? `<span class="badge">${n}</span>` : ''}</button>`;
+  }).join('');
+}
+function go(t) { cur = t; drawTabs(); render(); }
+
+async function refresh() {
+  try { counts = await api('/overview'); } catch { return; }
+  drawTabs(); render();
+}
+
+function table(head, rows) {
+  if (!rows.length) return '<div class="tablewrap"><div class="empty">Nothing here.</div></div>';
+  return `<div class="tablewrap"><table><thead><tr>${head.map((h) => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
+}
+
+async function render() {
+  const v = $('view');
+  v.innerHTML = '<div class="empty">Loading…</div>';
+  try {
+    if (cur === 'Overview') {
+      const c = counts;
+      v.innerHTML = `<div class="cards">
+        ${[['Pending applicants', c.pendingApplications], ['Orders to dispatch', c.ordersAwaitingDispatch],
+           ['Open bookings', c.openBookings], ['Awaiting payment', c.bookingsAwaitingPayment],
+           ['Users', c.users], ['Active Block Experts', c.experts]]
+          .map(([l, n]) => `<div class="card"><div class="n">${n ?? 0}</div><div class="l">${l}</div></div>`).join('')}
+      </div>`;
+    } else if (cur === 'Applicants') {
+      const apps = await api('/applications');
+      v.innerHTML = table(['Name', 'Handle', 'Hours', 'Rate', 'Base address', 'Applied', ''],
+        apps.map((a) => `<tr><td>${esc(a.name)}</td><td>${a.username ? '@' + esc(a.username) : '—'}</td>
+          <td class="wrap">${esc(a.hours)}</td><td>${esc(a.rate)}</td><td class="wrap">${esc(a.base_address)}</td>
+          <td>${when(a.created_at)}</td>
+          <td><button class="act primary" onclick="act('/applications/${a.id}/approve','Approved')">Approve</button>
+              <button class="act" onclick="act('/applications/${a.id}/reject','Rejected')">Reject</button></td></tr>`));
+    } else if (cur === 'Orders') {
+      const orders = await api('/orders');
+      v.innerHTML = table(['Ref', 'Created', 'Items', 'Total', 'Status', 'Address', ''],
+        orders.map((o) => {
+          const total = (o.amount_cents || 0) + (o.delivery_fee_cents || 0) - (o.discount_cents || 0);
+          const acts = [];
+          if (o.status === 'paid') acts.push(`<button class="act primary" onclick="act('/orders/${o.id}/dispatch','Dispatched')">Dispatch</button>`);
+          if (['paid', 'dispatched', 'delivered'].includes(o.status)) acts.push(`<button class="act" onclick="if(confirm('Mark refunded? (record only — send funds separately)'))act('/orders/${o.id}/refund','Marked refunded')">Refund</button>`);
+          return `<tr><td>${ref(o.id)}</td><td>${when(o.created_at)}</td><td>${esc(o.sku)} ×${o.qty}</td>
+            <td>${usd(total)}</td><td>${pill(o.status)}</td><td class="wrap">${esc(o.delivery_address || '—')}</td><td>${acts.join(' ')}</td></tr>`;
+        }));
+    } else if (cur === 'Bookings') {
+      const b = await api('/bookings');
+      const row = (x, extra) => `<tr><td>${ref(x.id)}</td><td>${when(x.slot_start)}</td>
+        <td class="wrap">${esc(x.customer_address)}</td><td>${usd(x.total_cents || x.service_fee_cents)}</td>
+        <td>${pill(x.status)}</td><td>${extra}</td></tr>`;
+      v.innerHTML = `<h2 class="sec">Open (needs a Block Expert)</h2>` +
+        table(['Ref', 'Slot', 'Address', 'Total', 'Status', ''], b.open.map((x) => row(x, 'assign via bot'))) +
+        `<h2 class="sec">Awaiting payment</h2>` +
+        table(['Ref', 'Slot', 'Address', 'Total', 'Status', ''], b.awaitingPayment.map((x) =>
+          row(x, `<button class="act" onclick="if(confirm('Mark refunded?'))act('/bookings/${x.id}/refund','Marked refunded')">Refund</button>`)));
+    } else if (cur === 'Users') {
+      const users = await api('/users');
+      v.innerHTML = table(['Name', 'Handle', 'Telegram ID', 'Role', 'Active', 'Joined'],
+        users.map((u) => `<tr><td>${esc(u.full_name || '—')}</td><td>${u.username ? '@' + esc(u.username) : '—'}</td>
+          <td>${u.telegram_id}</td><td>${esc(u.role)}</td><td>${u.active ? 'yes' : 'no'}</td><td>${when(u.created_at)}</td></tr>`));
+    }
+  } catch (err) {
+    if (err.message !== 'unauthorized') v.innerHTML = `<div class="empty">Error: ${esc(err.message)}</div>`;
+  }
+}
+
+async function act(path, okMsg) {
+  try { await post(path); toast(okMsg); refresh(); } catch (err) { toast('⚠ ' + err.message); }
+}
+
+// Boot: probe auth state.
+(async () => {
+  try { counts = await api('/overview'); show('app'); drawTabs(); render(); }
+  catch { /* show('login') already ran on 401 */ }
+})();
+</script>
+</body>
+</html>
