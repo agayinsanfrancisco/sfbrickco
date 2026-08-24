@@ -17,7 +17,8 @@ import { upcomingDays, hourlySlots, isCovered } from '../lib/slots.js';
 import { daysKeyboard, hoursKeyboard } from '../lib/keyboards.js';
 import { usd, fmtHourRange, mdEscape } from '../lib/format.js';
 import { getIntSetting, getBoolSetting } from '../lib/settings.js';
-import { presentWaiver, presentBookingMethods, waiverText } from './payments.js';
+import { presentWaiver, presentBookingMethods } from './payments.js';
+import { issueTermsToken, hasViewedTerms } from '../lib/termsgate.js';
 
 // Service fee: admin-editable setting, falling back to the env-derived default.
 // Used as the price floor when a Block Expert hasn't set their own rate.
@@ -157,30 +158,28 @@ export async function receiveAddress(ctx, chatId, telegramId, text) {
     : `💵 *${usd(total)}* (${usd(fee)} session + ${usd(surcharge)} travel)`;
   await ctx.bot.sendMessage(
     chatId,
-    `Please confirm:\n\n👤 ${mdEscape(s.adminName)}\n🕒 ${fmtHourRange(startIso, endIso)}\n📍 ${mdEscape(address)}\n${costLine}\n\n_By confirming you agree to the booking terms (📄)._`,
+    `Please confirm:\n\n👤 ${mdEscape(s.adminName)}\n🕒 ${fmtHourRange(startIso, endIso)}\n📍 ${mdEscape(address)}\n${costLine}\n\n_Open the 📄 booking terms, then tap “I agree”._`,
     {
       parse_mode: 'Markdown',
       reply_markup: {
         inline_keyboard: [
-          [{ text: '✅ Agree & continue to payment', callback_data: 'book:reqok' }],
-          [
-            { text: '📄 Terms', callback_data: 'book:terms' },
-            { text: '✖ Cancel', callback_data: 'book:cancel' },
-          ],
+          [{ text: '📄 Read the booking terms', url: `${config.server.publicUrl}/terms/b?k=${issueTermsToken(chatId)}` }],
+          [{ text: '✅ I agree — continue to payment', callback_data: 'book:reqok' }],
+          [{ text: '✖ Cancel', callback_data: 'book:cancel' }],
         ],
       },
     }
   );
 }
 
-export async function showTerms(ctx, chatId) {
-  await ctx.bot.sendMessage(chatId, waiverText('b'), { parse_mode: 'Markdown' });
-}
-
 export async function confirmRequest(ctx, chatId, telegramId) {
   const session = ctx.sessions.get(chatId);
   if (session?.step !== 'awaiting_confirm' || !session?.data?.startIso || !session.expertId) {
     await ctx.bot.sendMessage(chatId, 'That request expired — tap /book to start again.');
+    return;
+  }
+  if (!hasViewedTerms(chatId)) {
+    await ctx.bot.sendMessage(chatId, '☝️ Please open “📄 Read the booking terms” first — then tap “I agree” again.');
     return;
   }
   const { startIso, endIso, address } = session.data;

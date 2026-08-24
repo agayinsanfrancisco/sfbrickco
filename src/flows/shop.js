@@ -16,6 +16,7 @@ import { usd, shortRef } from '../lib/format.js';
 import { getBoolSetting, getIntSetting } from '../lib/settings.js';
 import { deliveryAfterThreshold, cartSubtotalCents } from '../lib/money.js';
 import { acceptWaiver } from './payments.js';
+import { issueTermsToken, hasViewedTerms } from '../lib/termsgate.js';
 
 // Cart lives in the session as `cart: [{ sku, name, qty, line_cents }]`.
 function getCart(ctx, chatId) {
@@ -295,6 +296,7 @@ export async function showReview(ctx, chatId) {
   const s = ctx.sessions.get(chatId);
   if (!s?.cart?.length) return;
   ctx.sessions.set(chatId, { ...s, step: 'reviewing' });
+  const termsUrl = `${config.server.publicUrl}/terms/o?k=${issueTermsToken(chatId)}`;
   const subtotal = cartSubtotalCents(s.cart);
   const threshold = await getIntSetting('free_delivery_threshold_cents', 0);
   const deliveryFee = deliveryAfterThreshold(subtotal, s.deliveryFee, threshold);
@@ -307,17 +309,17 @@ export async function showReview(ctx, chatId) {
       `${s.note ? `📝 ${s.note}\n` : ''}` +
       `Subtotal ${usd(subtotal)} · Delivery ${deliveryFee ? usd(deliveryFee) : 'free'}` +
       `${discount ? ` · Discount −${usd(discount)}` : ''}\n💵 *Total ${usd(total)}*\n\n` +
-      `_By continuing you agree to our sale terms (📄)._`,
+      `_Open the 📄 sale terms, then tap “I agree”._`,
     {
       parse_mode: 'Markdown',
       reply_markup: {
         inline_keyboard: [
-          [{ text: `✅ Agree & continue to payment`, callback_data: 'shop:confirm' }],
+          [{ text: '📄 Read the sale terms', url: termsUrl }],
+          [{ text: `✅ I agree — continue to payment`, callback_data: 'shop:confirm' }],
           [
             { text: s.note ? '📝 Edit note' : '📝 Add a note', callback_data: 'shop:note' },
-            { text: '📄 Terms', callback_data: 'shop:terms' },
+            { text: '✖ Cancel', callback_data: 'shop:cocancel' },
           ],
-          [{ text: '✖ Cancel', callback_data: 'shop:cocancel' }],
         ],
       },
     }
@@ -344,6 +346,10 @@ export async function cancelCheckout(ctx, chatId) {
 export async function confirmOrder(ctx, chatId, telegramId) {
   const s = ctx.sessions.get(chatId);
   if (!s?.cart?.length || s.step !== 'reviewing') return;
+  if (!hasViewedTerms(chatId)) {
+    await ctx.bot.sendMessage(chatId, '☝️ Please open “📄 Read the sale terms” first — then tap “I agree” again.');
+    return;
+  }
   const note = s.note || null;
   ctx.sessions.delete(chatId);
   const cart = s.cart;
